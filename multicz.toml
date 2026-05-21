@@ -1,0 +1,131 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Chris <goabonga@pm.me>
+
+# multicz.toml - per-component versioning, changelogs and tags for the
+# infrastructure monorepo. Driven by Conventional Commits.
+# Docs: https://goabonga.github.io/multicz/
+#
+# This is a single Go module with several published binaries. Each binary is
+# a multicz component: its version lives in `cmd/<dir>/version.go` as
+# `const Version = "x.y.z"` and is patched on release. Shared packages under
+# internal/ (domain, state, meta) are the de-facto core; a change confined to
+# them maps to no component and ships no release (see PLAN.md, open decision 2).
+
+[project]
+commit_convention = "conventional"
+tag_format = "{component}-v{version}"
+initial_version = "0.0.0"
+# Regenerate go.sum / prune the module graph after a version bump so the
+# committed module metadata stays consistent.
+post_bump_policy = "allow"
+state_file = ".multicz/state.json"
+
+# Custom commit types layered on the conventional defaults. `deprecate:`
+# announces an upcoming removal; `remove:` performs it after the n+2 window
+# (see docs/stability.md). Both bump minor.
+[project.bump_rules]
+feat = "minor"
+fix = "patch"
+perf = "patch"
+revert = "patch"
+deprecate = "minor"
+remove = "minor"
+
+# CHANGELOG layout aligned on Keep-a-Changelog. Sections render in order.
+[[project.changelog_sections]]
+title = "Added"
+types = ["feat"]
+
+[[project.changelog_sections]]
+title = "Deprecated"
+types = ["deprecate"]
+
+[[project.changelog_sections]]
+title = "Removed"
+types = ["remove"]
+
+[[project.changelog_sections]]
+title = "Fixed"
+types = ["fix"]
+
+[[project.changelog_sections]]
+title = "Performance"
+types = ["perf"]
+
+# ── Control plane ─────────────────────────────────────────────────────────
+
+[components.infra-api]
+paths = ["cmd/api/**", "internal/handler/**", "internal/httpsrv/**", "web/**"]
+bump_files = [
+    { file = "cmd/api/version.go", key = "regex:Version\\s*=\\s*\"([^\"]+)\"" },
+]
+changelog = "cmd/api/CHANGELOG.md"
+post_bump = ["go mod tidy"]
+
+[components.infra-controller-manager]
+paths = ["cmd/controller-manager/**", "internal/controllers/**", "internal/scheduler/**"]
+bump_files = [
+    { file = "cmd/controller-manager/version.go", key = "regex:Version\\s*=\\s*\"([^\"]+)\"" },
+]
+changelog = "cmd/controller-manager/CHANGELOG.md"
+post_bump = ["go mod tidy"]
+
+# ── Data plane ────────────────────────────────────────────────────────────
+
+[components.infra-agent]
+paths = ["cmd/agent/**", "internal/manager/**"]
+bump_files = [
+    { file = "cmd/agent/version.go", key = "regex:Version\\s*=\\s*\"([^\"]+)\"" },
+]
+changelog = "cmd/agent/CHANGELOG.md"
+post_bump = ["go mod tidy"]
+
+# ── Clients ───────────────────────────────────────────────────────────────
+
+[components.infra]
+paths = ["cmd/cli/**", "internal/client/**"]
+bump_files = [
+    { file = "cmd/cli/version.go", key = "regex:Version\\s*=\\s*\"([^\"]+)\"" },
+]
+changelog = "cmd/cli/CHANGELOG.md"
+post_bump = ["go mod tidy"]
+
+[components.terraform-provider-infra]
+paths = ["cmd/provider/**", "internal/provider/**", "internal/resources/**"]
+bump_files = [
+    { file = "cmd/provider/version.go", key = "regex:Version\\s*=\\s*\"([^\"]+)\"" },
+]
+changelog = "cmd/provider/CHANGELOG.md"
+# The provider speaks to the API over HTTP and is version-coupled to it.
+depends_on = ["infra-api"]
+post_bump = ["go mod tidy"]
+
+# ── Identity ──────────────────────────────────────────────────────────────
+
+[components.infra-idp]
+paths = ["cmd/idp/**", "internal/idp/**", "internal/auth/**"]
+bump_files = [
+    { file = "cmd/idp/version.go", key = "regex:Version\\s*=\\s*\"([^\"]+)\"" },
+]
+changelog = "cmd/idp/CHANGELOG.md"
+post_bump = ["go mod tidy"]
+
+# ── Observability ─────────────────────────────────────────────────────────
+
+[components.infra-exporter]
+paths = ["cmd/exporter/**"]
+bump_files = [
+    { file = "cmd/exporter/version.go", key = "regex:Version\\s*=\\s*\"([^\"]+)\"" },
+]
+changelog = "cmd/exporter/CHANGELOG.md"
+post_bump = ["go mod tidy"]
+
+# ── Helpers ───────────────────────────────────────────────────────────────
+
+[components.infra-container-init]
+paths = ["cmd/container-init/**"]
+bump_files = [
+    { file = "cmd/container-init/version.go", key = "regex:Version\\s*=\\s*\"([^\"]+)\"" },
+]
+changelog = "cmd/container-init/CHANGELOG.md"
+post_bump = ["go mod tidy"]

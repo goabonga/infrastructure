@@ -1,0 +1,455 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Chris <goabonga@pm.me>
+
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Cancels superseded PR runs but never main-branch releases.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  # Detect which components changed since the comparison ref. On PR: vs the
+  # target branch. On main: vs each component's last tag (multicz default),
+  # which scopes the release matrix to bump-worthy work. multicz is
+  # language-agnostic: it reads multicz.toml `paths`, so it works on the Go
+  # module just as it does on a Python workspace.
+  #
+  # Docs and integration detection bypass multicz on purpose: neither carries
+  # a version of its own, so there is no tag for `multicz changed` to compare
+  # against. We use a plain `git diff` on their paths instead.
+  detect:
+    name: detect changed components
+    runs-on: ubuntu-latest
+    outputs:
+      packages: ${{ steps.changed.outputs.packages }}
+      has_package_changes: ${{ steps.changed.outputs.has_package_changes }}
+      docs_changed: ${{ steps.changed.outputs.docs_changed }}
+      integration_changed: ${{ steps.changed.outputs.integration_changed }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-suffix: ${{ github.job }}
+      - name: Install multicz
+        run: uv tool install multicz
+      - name: Validate multicz configuration
+        run: uv tool run multicz validate --strict
+      - id: changed
+        name: Compute changed components
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            REF="origin/${{ github.base_ref }}"
+            ALL=$(uv tool run multicz changed --since "$REF" --output json | jq -c '.changed')
+          else
+            REF="each component's last tag"
+            ALL=$(uv tool run multicz changed --output json | jq -c '.changed')
+          fi
+          PACKAGES=$(echo "$ALL" | jq -c '.')
+          echo "packages=$PACKAGES" >> "$GITHUB_OUTPUT"
+          if [ "$PACKAGES" = "[]" ] || [ -z "$PACKAGES" ]; then
+            echo "has_package_changes=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_package_changes=true" >> "$GITHUB_OUTPUT"
+          fi
+          # Docs / integration detection via git diff (no tag exists for them).
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="origin/${{ github.base_ref }}"
+          elif git rev-parse HEAD^ > /dev/null 2>&1; then
+            BASE="HEAD^"
+          else
+            BASE="$(git hash-object -t tree /dev/null)"
+          fi
+          if git diff --quiet "$BASE" HEAD -- docs zensical.toml; then
+            echo "docs_changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "docs_changed=true" >> "$GITHUB_OUTPUT"
+          fi
+          if git diff --quiet "$BASE" HEAD -- test/integration; then
+            echo "integration_changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "integration_changed=true" >> "$GITHUB_OUTPUT"
+          fi
+          {
+            echo "## Detected changes"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Packages | \`$PACKAGES\` |"
+            echo "| Reference | \`$REF\` |"
+            echo "| Event | \`${{ github.event_name }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Quality jobs run once over the whole Go module rather than per component:
+  # the repo is a single `go` module, so `golangci-lint run`, `go vet` and
+  # `go test ./...` already operate package-by-package and per-component
+  # sharding would only add a brittle component->path lookup with no gain.
+  # They gate on `has_package_changes` so docs-only / chore-only pushes skip.
+
+  license-headers:
+    name: license-headers
+    needs: detect
+    if: needs.detect.outputs.has_package_changes == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check SPDX license headers
+        run: |
+          python scripts/add_license_header.py --path cmd --types go --check
+          python scripts/add_license_header.py --path internal --types go --check
+          python scripts/add_license_header.py --path test --types go --check
+          python scripts/add_license_header.py --path scripts --types py,sh --check
+          python scripts/add_license_header.py --path .github --types yml,yaml --check
+
+  lint:
+    name: lint
+    needs: detect
+    if: needs.detect.outputs.has_package_changes == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: latest
+
+  vet-build:
+    name: vet + build
+    needs: detect
+    if: needs.detect.outputs.has_package_changes == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: go vet
+        run: |
+          go vet ./...
+          go vet -tags=integration ./...
+      - name: go build
+        run: go build ./...
+
+  test:
+    name: test
+    needs: detect
+    if: needs.detect.outputs.has_package_changes == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run tests with coverage
+        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v6
+        with:
+          files: coverage.out
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+          disable_search: true
+
+  gosec:
+    name: gosec
+    needs: detect
+    if: needs.detect.outputs.has_package_changes == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install gosec
+        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
+      - name: Run gosec
+        run: gosec ./...
+
+  govulncheck:
+    name: govulncheck
+    needs: detect
+    if: needs.detect.outputs.has_package_changes == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - name: Run govulncheck
+        run: govulncheck ./...
+
+  osv-scanner:
+    name: osv-scanner
+    needs: detect
+    if: needs.detect.outputs.has_package_changes == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install OSV-Scanner
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -sSfL \
+            "https://github.com/google/osv-scanner/releases/latest/download/osv-scanner_linux_amd64" \
+            -o "$HOME/.local/bin/osv-scanner"
+          chmod +x "$HOME/.local/bin/osv-scanner"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Run OSV-Scanner
+        run: osv-scanner scan source --lockfile=go.mod
+
+  # Privileged kernel-level integration suite (build tag `integration`). Runs
+  # when any component changed OR the suite itself changed. NOTE: the real
+  # netns / iptables / cgroups tests added from M3 need a privileged host
+  # (root + CAP_NET_ADMIN); wire a self-hosted or privileged runner here then.
+  # The M0 smoke test only proves the tag wires up, so ubuntu-latest suffices.
+  integration:
+    name: integration
+    needs: detect
+    if: >-
+      needs.detect.outputs.has_package_changes == 'true'
+      || needs.detect.outputs.integration_changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run integration suite
+        run: go test -tags=integration ./test/integration/...
+
+  # Release on main only. multicz bumps cmd/<dir>/version.go, writes
+  # changelogs, creates the release commit and per-component tags, and pushes
+  # back to main. Artifact distribution is handled by the `publish` job.
+  release:
+    name: release
+    needs:
+      - detect
+      - license-headers
+      - lint
+      - vet-build
+      - test
+      - gosec
+      - govulncheck
+      - osv-scanner
+      - integration
+    if: >-
+      github.event_name == 'push'
+      && github.ref == 'refs/heads/main'
+      && needs.detect.outputs.has_package_changes == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      no_bumps: ${{ steps.bump.outputs.no_bumps }}
+      bumped: ${{ steps.bump.outputs.bumped }}
+      bumped_json: ${{ steps.bump.outputs.bumped_json }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-suffix: ${{ github.job }}
+      - name: Install multicz
+        run: uv tool install multicz
+      - name: Configure git author
+        run: |
+          NAME="${{ github.event.head_commit.author.name }}"
+          EMAIL="${{ github.event.head_commit.author.email }}"
+          git config user.name  "${NAME:-github-actions[bot]}"
+          git config user.email "${EMAIL:-41898282+github-actions[bot]@users.noreply.github.com}"
+      - name: Detect GPG availability
+        id: gpg
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          if [ -n "$GPG_PRIVATE_KEY" ] && [ -n "$GPG_PASSPHRASE" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Import and unlock GPG key
+        if: steps.gpg.outputs.available == 'true'
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          echo test | gpg --batch --yes --passphrase "$GPG_PASSPHRASE" \
+            --pinentry-mode loopback --sign > /dev/null
+          KEY_ID=$(gpg --list-secret-keys --with-colons \
+            | awk -F: '/^sec/{print $5; exit}')
+          git config user.signingkey "$KEY_ID"
+      - name: Plan release
+        run: uv tool run multicz plan --summary "$GITHUB_STEP_SUMMARY"
+      - name: Bump, commit, tag, push (signed)
+        id: bump_signed
+        if: steps.gpg.outputs.available == 'true'
+        run: |
+          set -euo pipefail
+          PLAN=$(uv tool run multicz bump --commit --tag --push --sign --output json)
+          BUMPED=$(echo "$PLAN" | jq -r '.bumps | keys | join(" ")')
+          BUMPED_JSON=$(echo "$PLAN" | jq -c '.bumps | keys')
+          echo "bumped=$BUMPED" >> "$GITHUB_OUTPUT"
+          echo "bumped_json=$BUMPED_JSON" >> "$GITHUB_OUTPUT"
+          if [ -z "$BUMPED" ]; then
+            echo "no_bumps=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "no_bumps=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Bump, commit, tag, push
+        id: bump_unsigned
+        if: steps.gpg.outputs.available != 'true'
+        run: |
+          set -euo pipefail
+          PLAN=$(uv tool run multicz bump --commit --tag --push --output json)
+          BUMPED=$(echo "$PLAN" | jq -r '.bumps | keys | join(" ")')
+          BUMPED_JSON=$(echo "$PLAN" | jq -c '.bumps | keys')
+          echo "bumped=$BUMPED" >> "$GITHUB_OUTPUT"
+          echo "bumped_json=$BUMPED_JSON" >> "$GITHUB_OUTPUT"
+          if [ -z "$BUMPED" ]; then
+            echo "no_bumps=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "no_bumps=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Resolve release outputs
+        id: bump
+        run: |
+          if [ "${{ steps.gpg.outputs.available }}" = "true" ]; then
+            echo 'bumped=${{ steps.bump_signed.outputs.bumped }}' >> "$GITHUB_OUTPUT"
+            echo 'bumped_json=${{ steps.bump_signed.outputs.bumped_json }}' >> "$GITHUB_OUTPUT"
+            echo 'no_bumps=${{ steps.bump_signed.outputs.no_bumps }}' >> "$GITHUB_OUTPUT"
+          else
+            echo 'bumped=${{ steps.bump_unsigned.outputs.bumped }}' >> "$GITHUB_OUTPUT"
+            echo 'bumped_json=${{ steps.bump_unsigned.outputs.bumped_json }}' >> "$GITHUB_OUTPUT"
+            echo 'no_bumps=${{ steps.bump_unsigned.outputs.no_bumps }}' >> "$GITHUB_OUTPUT"
+          fi
+
+  # Build and publish the bumped components: cross-compiled binaries attached
+  # to a per-component GitHub Release. Matrix over each bumped component so one
+  # failure does not abort the others. .deb packaging and Docker images are
+  # added in later milestones (see PLAN.md).
+  publish:
+    name: publish (${{ matrix.component }})
+    needs: [detect, release]
+    if: >-
+      github.event_name == 'push'
+      && github.ref == 'refs/heads/main'
+      && needs.release.result == 'success'
+      && needs.release.outputs.no_bumps == 'false'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        component: ${{ fromJson(needs.release.outputs.bumped_json) }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-suffix: ${{ github.job }}
+      - name: Install multicz
+        run: uv tool install multicz
+      - name: Build release binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          component="${{ matrix.component }}"
+          case "$component" in
+            infra)                     dir=cli ;;
+            terraform-provider-infra)  dir=provider ;;
+            infra-*)                   dir="${component#infra-}" ;;
+            *)                         echo "unknown component $component" >&2; exit 1 ;;
+          esac
+          version=$(uv tool run multicz get "$component")
+          tag="${component}-v${version}"
+          mkdir -p dist
+          for platform in linux/amd64 linux/arm64; do
+            os="${platform%/*}"; arch="${platform#*/}"
+            out="dist/${component}_${version}_${os}_${arch}"
+            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
+              go build -ldflags='-s -w' -o "$out" "./cmd/${dir}/"
+          done
+          ( cd dist && sha256sum ${component}_${version}_* > "${component}_${version}_checksums.txt" )
+          ls -l dist
+          notes=$(uv tool run multicz release-notes --tag "$tag" || echo "Release $tag")
+          gh release create "$tag" \
+            --title "$tag" \
+            --notes "$notes" \
+            dist/${component}_${version}_*
+
+  # Build the Zensical site and deploy to GitHub Pages. Gated on a successful
+  # release bump: the site embeds version + changelog content, so every bump
+  # invalidates the rendered output even when no markdown changed.
+  docs:
+    name: docs
+    needs: [detect, release]
+    if: >-
+      github.event_name == 'push'
+      && github.ref == 'refs/heads/main'
+      && needs.release.result == 'success'
+      && needs.release.outputs.no_bumps == 'false'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+      - uses: actions/configure-pages@v6
+        with:
+          enablement: true
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-suffix: ${{ github.job }}
+      - name: Build site
+        run: uv tool run zensical build --clean
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v5
