@@ -1,0 +1,19 @@
+# Build / release artifacts
+build/
+dist/
+site/
+
+# Go
+*.test
+*.out
+coverage.txt
+coverage.xml
+
+# Frontend
+www/node_modules/
+www/dist/
+
+# Local state
+.multicz/state.json
+*.tfstate
+*.tfstate.*
