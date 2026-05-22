@@ -1,7 +1,7 @@
 # Deployment
 
-This page covers running the components on real hosts. Docker images and Ansible
-playbooks for multi-host clusters land in later operations slices.
+This page covers running the components on real hosts: a single dev host, the
+Debian packages, and a libvirt-based multi-host test cluster driven by Ansible.
 
 ## Single host
 
@@ -42,7 +42,19 @@ The long-running components ship systemd units under `deploy/systemd/`
 `infra-exporter` exposes Prometheus metrics; a docker-compose stack with
 Prometheus and Grafana dashboards is provided for local monitoring.
 
-## Multi-host
+## Multi-host (libvirt + Ansible)
 
-For clusters, state moves to etcd and hosts are provisioned with Ansible. See
-the architecture [overview](../architecture/overview.md).
+`deploy/ansible/` provisions a libvirt/KVM test cluster (one control host plus
+agents) from a Debian cloud image and cloud-init, installs the `.deb` packages
+and starts the services:
+
+```bash
+make deb VERSION=0.1.0          # build the packages into dist/
+cd deploy/ansible
+ansible-playbook create-vms.yml # provision the VMs
+ansible-playbook site.yml       # install packages and start services
+ansible-playbook destroy-vms.yml
+```
+
+See `deploy/ansible/README.md` for prerequisites. For real clusters, state moves
+to etcd; see the architecture [overview](../architecture/overview.md).
