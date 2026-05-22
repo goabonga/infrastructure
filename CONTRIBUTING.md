@@ -41,7 +41,7 @@ make test
 pre-commit install
 ```
 
-Requires Go 1.24+, `golangci-lint`, and `uv` (used to run `multicz` and
+Requires Go 1.25+, `golangci-lint`, and `uv` (used to run `multicz` and
 `zensical` without a global install).
 
 ## Running checks
