@@ -35,6 +35,7 @@ jobs:
       has_package_changes: ${{ steps.changed.outputs.has_package_changes }}
       docs_changed: ${{ steps.changed.outputs.docs_changed }}
       integration_changed: ${{ steps.changed.outputs.integration_changed }}
+      www_changed: ${{ steps.changed.outputs.www_changed }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -83,6 +84,13 @@ jobs:
           else
             echo "integration_changed=true" >> "$GITHUB_OUTPUT"
           fi
+          # Frontend detection: the Vite app has its own toolchain (Node), so it
+          # is gated by a git diff on www/ rather than the Go matrix.
+          if git diff --quiet "$BASE" HEAD -- www; then
+            echo "www_changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "www_changed=true" >> "$GITHUB_OUTPUT"
+          fi
           {
             echo "## Detected changes"
             echo ""
@@ -128,6 +136,29 @@ jobs:
       - uses: golangci/golangci-lint-action@v8
         with:
           version: latest
+
+  # Frontend quality gate (Node toolchain): lint, type-check, unit tests and a
+  # production build of the Vite SPA. Gated on changes under www/.
+  www:
+    name: www
+    needs: detect
+    if: needs.detect.outputs.www_changed == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: www
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: www/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test
+      - run: npm run build
 
   vet-build:
     name: vet + build
@@ -248,6 +279,7 @@ jobs:
       - detect
       - license-headers
       - lint
+      - www
       - vet-build
       - test
       - gosec
@@ -381,6 +413,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: www/package-lock.json
       - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
@@ -399,6 +436,12 @@ jobs:
             infra-*)                   dir="${component#infra-}" ;;
             *)                         echo "unknown component $component" >&2; exit 1 ;;
           esac
+          # The web dashboard embeds the built SPA, so build the frontend first.
+          if [ "$dir" = "www" ]; then
+            ( cd www && npm ci && npm run build )
+            find cmd/www/dist -mindepth 1 ! -name .gitkeep -delete
+            cp -r www/dist/. cmd/www/dist/
+          fi
           version=$(uv tool run multicz get "$component")
           tag="${component}-v${version}"
           mkdir -p dist
