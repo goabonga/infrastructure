@@ -35,6 +35,21 @@ type NetworkBackend interface {
 	DeleteBridge(ctx context.Context, name string) error
 	// BridgeExists reports whether the named bridge is present.
 	BridgeExists(ctx context.Context, name string) (bool, error)
+	// EnsureAddress assigns addrCIDR to iface if not already present. Idempotent.
+	EnsureAddress(ctx context.Context, iface, addrCIDR string) error
+	// DeleteAddress removes addrCIDR from iface. Removing an absent address is
+	// not an error.
+	DeleteAddress(ctx context.Context, iface, addrCIDR string) error
+	// EnableForwarding turns on IPv4 forwarding.
+	EnableForwarding(ctx context.Context) error
+	// EnsureNAT adds a masquerade rule for sourceCIDR egressing via hostIface.
+	// Idempotent.
+	EnsureNAT(ctx context.Context, sourceCIDR, hostIface string) error
+	// DeleteNAT removes the masquerade rule. Removing an absent rule is not an
+	// error.
+	DeleteNAT(ctx context.Context, sourceCIDR, hostIface string) error
+	// DefaultInterface returns the host's default-route interface.
+	DefaultInterface(ctx context.Context) (string, error)
 }
 
 // bridgeName derives a valid, deterministic bridge interface name from a UID,
@@ -127,4 +142,62 @@ func (b *ExecBackend) DeleteBridge(ctx context.Context, name string) error {
 		return fmt.Errorf("manager: delete bridge %q: %w: %s", name, err, strings.TrimSpace(out))
 	}
 	return nil
+}
+
+// EnsureAddress assigns addrCIDR to iface, treating an existing address as ok.
+func (b *ExecBackend) EnsureAddress(ctx context.Context, iface, addrCIDR string) error {
+	out, err := b.run(ctx, "ip", "addr", "add", addrCIDR, "dev", iface)
+	if err != nil && !strings.Contains(out, "File exists") {
+		return fmt.Errorf("manager: add address %s on %s: %w: %s", addrCIDR, iface, err, strings.TrimSpace(out))
+	}
+	return nil
+}
+
+// DeleteAddress removes addrCIDR from iface, ignoring an absent address.
+func (b *ExecBackend) DeleteAddress(ctx context.Context, iface, addrCIDR string) error {
+	out, err := b.run(ctx, "ip", "addr", "del", addrCIDR, "dev", iface)
+	if err != nil && !strings.Contains(out, "Cannot assign") && !strings.Contains(out, "does not exist") {
+		return fmt.Errorf("manager: del address %s on %s: %w: %s", addrCIDR, iface, err, strings.TrimSpace(out))
+	}
+	return nil
+}
+
+// EnableForwarding turns on IPv4 forwarding.
+func (b *ExecBackend) EnableForwarding(ctx context.Context) error {
+	if out, err := b.run(ctx, "sysctl", "-w", "net.ipv4.ip_forward=1"); err != nil {
+		return fmt.Errorf("manager: enable forwarding: %w: %s", err, strings.TrimSpace(out))
+	}
+	return nil
+}
+
+// EnsureNAT adds a masquerade rule for sourceCIDR via hostIface if absent.
+func (b *ExecBackend) EnsureNAT(ctx context.Context, sourceCIDR, hostIface string) error {
+	if _, err := b.run(ctx, "iptables", "-t", "nat", "-C", "POSTROUTING", "-s", sourceCIDR, "-o", hostIface, "-j", "MASQUERADE"); err == nil {
+		return nil
+	}
+	if out, err := b.run(ctx, "iptables", "-t", "nat", "-A", "POSTROUTING", "-s", sourceCIDR, "-o", hostIface, "-j", "MASQUERADE"); err != nil {
+		return fmt.Errorf("manager: add nat for %s via %s: %w: %s", sourceCIDR, hostIface, err, strings.TrimSpace(out))
+	}
+	return nil
+}
+
+// DeleteNAT removes the masquerade rule (best effort).
+func (b *ExecBackend) DeleteNAT(ctx context.Context, sourceCIDR, hostIface string) error {
+	_, _ = b.run(ctx, "iptables", "-t", "nat", "-D", "POSTROUTING", "-s", sourceCIDR, "-o", hostIface, "-j", "MASQUERADE")
+	return nil
+}
+
+// DefaultInterface returns the host's default-route interface.
+func (b *ExecBackend) DefaultInterface(ctx context.Context) (string, error) {
+	out, err := b.run(ctx, "ip", "route", "show", "default")
+	if err != nil {
+		return "", fmt.Errorf("manager: default route: %w: %s", err, strings.TrimSpace(out))
+	}
+	fields := strings.Fields(out)
+	for i, f := range fields {
+		if f == "dev" && i+1 < len(fields) {
+			return fields[i+1], nil
+		}
+	}
+	return "", fmt.Errorf("manager: no default-route interface found")
 }

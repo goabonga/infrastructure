@@ -18,14 +18,60 @@ import (
 // fakeBackend is an in-memory NetworkBackend for tests.
 type fakeBackend struct {
 	bridges     map[string]bool
+	addresses   map[string]bool // "iface addr/prefix"
+	nat         map[string]bool // "cidr iface"
+	forwarding  bool
+	defaultIfc  string
 	ensureErr   error
 	deleteErr   error
+	addrErr     error
+	natErr      error
 	ensureCalls []string
 	deleteCalls []string
 }
 
 func newFakeBackend() *fakeBackend {
-	return &fakeBackend{bridges: make(map[string]bool)}
+	return &fakeBackend{
+		bridges:    make(map[string]bool),
+		addresses:  make(map[string]bool),
+		nat:        make(map[string]bool),
+		defaultIfc: "eth0",
+	}
+}
+
+func (f *fakeBackend) EnsureAddress(_ context.Context, iface, addrCIDR string) error {
+	if f.addrErr != nil {
+		return f.addrErr
+	}
+	f.addresses[iface+" "+addrCIDR] = true
+	return nil
+}
+
+func (f *fakeBackend) DeleteAddress(_ context.Context, iface, addrCIDR string) error {
+	delete(f.addresses, iface+" "+addrCIDR)
+	return nil
+}
+
+func (f *fakeBackend) EnableForwarding(_ context.Context) error {
+	f.forwarding = true
+	return nil
+}
+
+func (f *fakeBackend) EnsureNAT(_ context.Context, sourceCIDR, hostIface string) error {
+	if f.natErr != nil {
+		return f.natErr
+	}
+	f.nat[sourceCIDR+" "+hostIface] = true
+	return nil
+}
+
+func (f *fakeBackend) DeleteNAT(_ context.Context, sourceCIDR, hostIface string) error {
+	delete(f.nat, sourceCIDR+" "+hostIface)
+	return nil
+}
+
+func (f *fakeBackend) DefaultInterface(_ context.Context) (string, error) {
+	return f.defaultIfc, nil
 }
 
 func (f *fakeBackend) EnsureBridge(_ context.Context, b manager.Bridge) error {
