@@ -40,6 +40,15 @@ The provider manages the full network and compute topology:
 | `infra_disk` | Persistent disk; `kms_key_id` encrypts it. |
 | `infra_disk_file` | File injected into a disk. |
 | `infra_compute` | Compute instance with attached disks. |
+| `infra_dns_zone` | DNS zone. |
+| `infra_dns_record` | DNS record within a zone. |
+| `infra_peering` | Peering between two VPCs. |
+| `infra_load_balancer` | Layer-4 load balancer. |
+| `infra_lb_backend` | Compute backend attached to a load balancer. |
+| `infra_waf_policy` | Web-application-firewall policy. |
+| `infra_waf_rule` | Rule within a WAF policy. |
+| `infra_node` | Host registered with the control plane. |
+| `infra_node_pool` | Pool of nodes selected by label. |
 
 ## Example: a VPC with an encrypted-disk compute instance
 
