@@ -7,11 +7,13 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"flag"
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -42,15 +44,25 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	var master []byte
+	if raw := os.Getenv("GOA_KMS_KEY"); raw != "" {
+		master, err = base64.StdEncoding.DecodeString(raw)
+		if err != nil {
+			return err
+		}
+	}
+
 	net := manager.NewExecBackend()
 	vpcs := registry.New[resource.VPCSpec, resource.VPCStatus](store, resource.KindVPC)
 	subnets := registry.New[resource.SubnetSpec, resource.SubnetStatus](store, resource.KindSubnet)
 	igws := registry.New[resource.IGWSpec, resource.IGWStatus](store, resource.KindIGW)
+	disks := registry.New[resource.DiskSpec, resource.DiskStatus](store, resource.KindDisk)
 	acls := registry.New[resource.ACLPolicySpec, resource.ACLPolicyStatus](store, resource.KindACLPolicy)
 	agent := manager.NewAgent(*interval, logger,
 		manager.NewVPCReconciler(vpcs, net),
 		manager.NewSubnetReconciler(subnets, vpcs, net),
 		manager.NewIGWReconciler(igws, vpcs, net),
+		manager.NewDiskReconciler(disks, manager.NewExecDiskBackend(filepath.Join(*stateDir, "disks")), master),
 		manager.NewACLReconciler(acls, manager.NewExecFirewall()),
 	)
 
