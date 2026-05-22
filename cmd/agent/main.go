@@ -58,12 +58,17 @@ func run() error {
 	igws := registry.New[resource.IGWSpec, resource.IGWStatus](store, resource.KindIGW)
 	disks := registry.New[resource.DiskSpec, resource.DiskStatus](store, resource.KindDisk)
 	acls := registry.New[resource.ACLPolicySpec, resource.ACLPolicyStatus](store, resource.KindACLPolicy)
+	sgs := registry.New[resource.SecurityGroupSpec, resource.SecurityGroupStatus](store, resource.KindSecurityGroup)
+	sgRules := registry.New[resource.SecurityGroupRuleSpec, resource.SecurityGroupRuleStatus](store, resource.KindSecurityGroupRule)
+	computes := registry.New[resource.ComputeSpec, resource.ComputeStatus](store, resource.KindCompute)
 	agent := manager.NewAgent(*interval, logger,
 		manager.NewVPCReconciler(vpcs, net),
 		manager.NewSubnetReconciler(subnets, vpcs, net),
 		manager.NewIGWReconciler(igws, vpcs, net),
 		manager.NewDiskReconciler(disks, manager.NewExecDiskBackend(filepath.Join(*stateDir, "disks")), master),
+		manager.NewSecurityGroupReconciler(sgs, sgRules, manager.NewExecSecurityGroup()),
 		manager.NewACLReconciler(acls, manager.NewExecFirewall()),
+		manager.NewComputeReconciler(computes, subnets, vpcs, disks, sgs, manager.NewExecComputeBackend(*stateDir)),
 	)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
