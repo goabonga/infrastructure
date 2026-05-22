@@ -14,6 +14,10 @@ const KindSecurityGroup = "security_group"
 // KindSecurityGroupRule is the resource kind for security-group rules.
 const KindSecurityGroupRule = "security_group_rule"
 
+// SecurityGroupFinalizer is attached by the agent so the iptables chain is
+// flushed and deleted before the security-group record is removed.
+const SecurityGroupFinalizer = "infra.io/security-group"
+
 // SecurityGroupSpec is the desired state of a security group.
 type SecurityGroupSpec struct {
 	VPCID string `json:"vpcId"`

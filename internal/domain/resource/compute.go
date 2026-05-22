@@ -8,6 +8,10 @@ import "fmt"
 // KindCompute is the resource kind for compute instances.
 const KindCompute = "compute"
 
+// ComputeFinalizer is attached by the agent so the network namespace, veth pair,
+// cgroup, rootfs and firewall rules are torn down before the record is removed.
+const ComputeFinalizer = "infra.io/compute"
+
 // ComputeDiskRef attaches a disk to a compute instance at a mount path.
 type ComputeDiskRef struct {
 	DiskID    string `json:"diskId"`
@@ -60,8 +64,13 @@ type ComputeStatus struct {
 	StatusBase
 	IP        string `json:"ip,omitempty"`
 	Namespace string `json:"namespace,omitempty"`
-	Ready     bool   `json:"ready"`
-	NodeName  string `json:"nodeName,omitempty"`
+	// VethHost is the bridge-side veth interface name, recorded so teardown can
+	// remove it without re-deriving the topology.
+	VethHost string `json:"vethHost,omitempty"`
+	// Rootfs is the extracted OCI rootfs path, recorded for teardown.
+	Rootfs   string `json:"rootfs,omitempty"`
+	Ready    bool   `json:"ready"`
+	NodeName string `json:"nodeName,omitempty"`
 }
 
 // Compute is a compute-instance resource.
