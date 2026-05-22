@@ -261,13 +261,30 @@ jobs:
       needs.detect.outputs.has_package_changes == 'true'
       || needs.detect.outputs.integration_changed == 'true'
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: infra
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
+      # The kernel-level tests (bridge, firewall) skip without root; the
+      # postgres test runs against the service above.
       - name: Run integration suite
+        env:
+          POSTGRES_DSN: postgres://postgres:postgres@localhost:5432/infra?sslmode=disable
         run: go test -tags=integration ./test/integration/...
 
   # Release on main only. multicz bumps cmd/<dir>/version.go, writes
