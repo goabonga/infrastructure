@@ -11,6 +11,10 @@ import (
 // KindVPC is the resource kind for virtual private clouds.
 const KindVPC = "vpc"
 
+// VPCFinalizer is the finalizer the agent attaches to a VPC so the Linux bridge
+// is torn down before the resource record is removed.
+const VPCFinalizer = "infra.io/vpc"
+
 // VPCSpec is the desired state of a VPC.
 type VPCSpec struct {
 	// CIDR is the address range of the VPC in CIDR notation (e.g. 10.0.0.0/16).
