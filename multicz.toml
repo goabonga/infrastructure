@@ -131,3 +131,17 @@ bump_files = [
 ]
 changelog = "cmd/container-init/CHANGELOG.md"
 post_bump = ["go mod tidy"]
+
+# ── Web ───────────────────────────────────────────────────────────────────
+
+# The web dashboard couples a Go server (cmd/www, internal/web) with the Vite
+# SPA (www/). Both the Go version constant and the package.json version are
+# bumped together.
+[components.infra-www]
+paths = ["cmd/www/**", "internal/web/**", "www/**"]
+bump_files = [
+    { file = "cmd/www/version.go", key = "regex:Version\\s*=\\s*\"([^\"]+)\"" },
+    { file = "www/package.json", key = "regex:\"version\"\\s*:\\s*\"([^\"]+)\"" },
+]
+changelog = "cmd/www/CHANGELOG.md"
+post_bump = ["go mod tidy"]

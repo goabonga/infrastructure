@@ -13,6 +13,7 @@ PROVIDER_BIN := $(BUILD_DIR)/terraform-provider-infra
 EXPORTER_BIN := $(BUILD_DIR)/infra-exporter
 IDP_BIN := $(BUILD_DIR)/infra-idp
 CONTAINER_INIT_BIN := $(BUILD_DIR)/infra-container-init
+WWW_BIN := $(BUILD_DIR)/infra-www
 
 # Run multicz / zensical through uv without a global install.
 MULTICZ := uv tool run multicz
@@ -20,6 +21,7 @@ ZENSICAL := uv tool run zensical
 
 .PHONY: help build build-cli build-api build-agent build-controller-manager \
         build-provider build-exporter build-idp build-container-init \
+        frontend build-www \
         fmt vet lint test test-integration tidy check \
         license license-check \
         docs docs-gen docs-serve \
@@ -58,6 +60,14 @@ build-idp: ## Build the identity provider
 
 build-container-init: ## Build the container-init helper (static)
 	CGO_ENABLED=0 go build -ldflags='-s -w' -o $(CONTAINER_INIT_BIN) ./cmd/container-init/
+
+frontend: ## Build the SPA and stage it into the infra-www embed dir
+	cd www && npm ci && npm run build
+	find cmd/www/dist -mindepth 1 ! -name .gitkeep -delete
+	cp -r www/dist/. cmd/www/dist/
+
+build-www: frontend ## Build the web dashboard server with the SPA embedded
+	go build -o $(WWW_BIN) ./cmd/www/
 
 # ── Quality ────────────────────────────────────────────────────────────────
 
