@@ -42,10 +42,15 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	net := manager.NewExecBackend()
 	vpcs := registry.New[resource.VPCSpec, resource.VPCStatus](store, resource.KindVPC)
+	subnets := registry.New[resource.SubnetSpec, resource.SubnetStatus](store, resource.KindSubnet)
+	igws := registry.New[resource.IGWSpec, resource.IGWStatus](store, resource.KindIGW)
 	acls := registry.New[resource.ACLPolicySpec, resource.ACLPolicyStatus](store, resource.KindACLPolicy)
 	agent := manager.NewAgent(*interval, logger,
-		manager.NewVPCReconciler(vpcs, manager.NewExecBackend()),
+		manager.NewVPCReconciler(vpcs, net),
+		manager.NewSubnetReconciler(subnets, vpcs, net),
+		manager.NewIGWReconciler(igws, vpcs, net),
 		manager.NewACLReconciler(acls, manager.NewExecFirewall()),
 	)
 
