@@ -3,19 +3,17 @@
 
 import { useEffect, useState } from "react";
 
-import { listACLs, listVPCs } from "../api/client";
+import { listResources } from "../api/generic";
+
+const TILES = ["vpc", "subnet", "security_group", "disk", "compute"] as const;
 
 export default function Overview() {
-  const [vpcs, setVpcs] = useState<number | null>(null);
-  const [acls, setAcls] = useState<number | null>(null);
+  const [counts, setCounts] = useState<Record<string, number>>({});
   const [error, setError] = useState("");
 
   useEffect(() => {
-    Promise.all([listVPCs(), listACLs()])
-      .then(([v, a]) => {
-        setVpcs(v.length);
-        setAcls(a.length);
-      })
+    Promise.all(TILES.map((k) => listResources(k).then((items) => [k, items.length] as const)))
+      .then((pairs) => setCounts(Object.fromEntries(pairs)))
       .catch((e: unknown) => setError(String(e)));
   }, []);
 
@@ -24,14 +22,12 @@ export default function Overview() {
       <h2>Overview</h2>
       {error && <p className="error">{error}</p>}
       <div className="cards">
-        <div className="card">
-          <div>VPCs</div>
-          <div className="value">{vpcs ?? "-"}</div>
-        </div>
-        <div className="card">
-          <div>ACL policies</div>
-          <div className="value">{acls ?? "-"}</div>
-        </div>
+        {TILES.map((k) => (
+          <div className="card" key={k}>
+            <div>{k}</div>
+            <div className="value">{counts[k] ?? "-"}</div>
+          </div>
+        ))}
       </div>
     </section>
   );

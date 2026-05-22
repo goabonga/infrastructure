@@ -22,6 +22,9 @@ export default function Layout() {
           <NavLink to="/vpcs" className={navClass}>
             VPCs
           </NavLink>
+          <NavLink to="/resources" className={navClass}>
+            Resources
+          </NavLink>
           <NavLink to="/acls" className={navClass}>
             ACL policies
           </NavLink>

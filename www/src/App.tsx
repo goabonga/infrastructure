@@ -6,6 +6,7 @@ import { Route, Routes } from "react-router-dom";
 import Layout from "./components/Layout";
 import Acls from "./pages/Acls";
 import Overview from "./pages/Overview";
+import Resources from "./pages/Resources";
 import Settings from "./pages/Settings";
 import Vpcs from "./pages/Vpcs";
 
@@ -15,6 +16,7 @@ export default function App() {
       <Route element={<Layout />}>
         <Route index element={<Overview />} />
         <Route path="vpcs" element={<Vpcs />} />
+        <Route path="resources" element={<Resources />} />
         <Route path="acls" element={<Acls />} />
         <Route path="settings" element={<Settings />} />
       </Route>
