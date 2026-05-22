@@ -26,6 +26,10 @@ linters:
           disabled: false
   exclusions:
     generated: lax
+    paths:
+      # The frontend's node_modules ships unrelated Go example files (e.g.
+      # flatted); never lint anything under www/.
+      - www
     rules:
       # Test files may use dot-imports and skip some doc requirements.
       - path: _test\.go
@@ -36,6 +40,9 @@ formatters:
   enable:
     - gofmt
     - goimports
+  exclusions:
+    paths:
+      - www
   settings:
     goimports:
       local-prefixes:
