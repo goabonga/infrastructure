@@ -11,6 +11,10 @@ const (
 	KindDiskFile = "disk_file"
 )
 
+// DiskFinalizer is attached by the agent so the backing store (and any LUKS
+// mapping) is torn down before the disk record is deleted.
+const DiskFinalizer = "infra.io/disk"
+
 // DiskSpec is the desired state of a persistent disk. Setting KMSKeyID encrypts
 // it at rest via dm-crypt with that key.
 type DiskSpec struct {
