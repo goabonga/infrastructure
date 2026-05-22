@@ -451,6 +451,13 @@ jobs:
             CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
               go build -ldflags='-s -w' -o "$out" "./cmd/${dir}/"
           done
+          # Debian packages for the binary components (the web app ships as a
+          # container image instead).
+          if [ "$component" != "infra-www" ]; then
+            for arch in amd64 arm64; do
+              ARCH="$arch" ./packaging/build-debs.sh "$version" "$component"
+            done
+          fi
           ( cd dist && sha256sum ${component}_${version}_* > "${component}_${version}_checksums.txt" )
           ls -l dist
           notes=$(uv tool run multicz release-notes --tag "$tag" || echo "Release $tag")
