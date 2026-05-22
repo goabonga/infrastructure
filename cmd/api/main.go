@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 
+	"github.com/goabonga/infrastructure/internal/crypto"
 	"github.com/goabonga/infrastructure/internal/httpsrv"
 	"github.com/goabonga/infrastructure/internal/meta"
 	"github.com/goabonga/infrastructure/internal/state"
@@ -20,7 +21,19 @@ func main() {
 	flag.Parse()
 
 	store := state.NewFileStore(*stateDir)
-	srv := httpsrv.New(store)
+
+	var opts []httpsrv.Option
+	if raw := os.Getenv("GOA_KMS_KEY"); raw != "" {
+		kek, err := crypto.NewKEKFromBase64(raw)
+		if err != nil {
+			log.Fatalf("infra-api: GOA_KMS_KEY: %v", err)
+		}
+		opts = append(opts, httpsrv.WithSecretEncryption(kek))
+		log.Print("infra-api: secret encryption enabled")
+	} else {
+		log.Print("infra-api: GOA_KMS_KEY unset; secret routes disabled")
+	}
+	srv := httpsrv.New(store, opts...)
 
 	log.Printf("%s listening on %s (state dir %s)", meta.Line("infra-api", Version), *addr, *stateDir)
 	if err := srv.ListenAndServe(*addr); err != nil {
