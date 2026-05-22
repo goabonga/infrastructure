@@ -73,6 +73,15 @@ func (s *Server) routes() {
 	register[resource.DiskFileSpec, resource.DiskFileStatus](s, resource.KindDiskFile)
 	register[resource.ComputeSpec, resource.ComputeStatus](s, resource.KindCompute)
 	register[resource.ACLPolicySpec, resource.ACLPolicyStatus](s, resource.KindACLPolicy)
+	register[resource.DNSZoneSpec, resource.DNSZoneStatus](s, resource.KindDNSZone)
+	register[resource.DNSRecordSpec, resource.DNSRecordStatus](s, resource.KindDNSRecord)
+	register[resource.PeeringSpec, resource.PeeringStatus](s, resource.KindPeering)
+	register[resource.LoadBalancerSpec, resource.LoadBalancerStatus](s, resource.KindLoadBalancer)
+	register[resource.LBBackendSpec, resource.LBBackendStatus](s, resource.KindLBBackend)
+	register[resource.WAFPolicySpec, resource.WAFPolicyStatus](s, resource.KindWAFPolicy)
+	register[resource.WAFRuleSpec, resource.WAFRuleStatus](s, resource.KindWAFRule)
+	register[resource.NodeSpec, resource.NodeStatus](s, resource.KindNode)
+	register[resource.NodePoolSpec, resource.NodePoolStatus](s, resource.KindNodePool)
 
 	// Encryption-backed resources need a KEK.
 	if s.kek != nil {
