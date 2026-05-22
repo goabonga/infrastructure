@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/goabonga/infrastructure/internal/auth"
 	"github.com/goabonga/infrastructure/internal/client"
 	"github.com/goabonga/infrastructure/internal/domain/resource"
 	"github.com/goabonga/infrastructure/internal/httpsrv"
@@ -70,6 +71,27 @@ func TestClientRoundtrip(t *testing.T) {
 	}
 	if _, err := c.Get(ctx, "vpc-1"); !errors.Is(err, client.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound after delete, got %v", err)
+	}
+}
+
+func TestClientSendsBearerToken(t *testing.T) {
+	t.Parallel()
+
+	tokenAuth := auth.NewTokenAuthenticator(map[string]string{"tok": "alice"})
+	srv := httptest.NewServer(httpsrv.New(state.NewFileStore(t.TempDir()), httpsrv.WithAuth(tokenAuth)).Handler())
+	t.Cleanup(srv.Close)
+	ctx := context.Background()
+
+	// Without a token the API rejects the request.
+	noToken := client.New[resource.VPCSpec, resource.VPCStatus](srv.URL, resource.KindVPC)
+	if _, err := noToken.List(ctx); err == nil {
+		t.Fatal("expected an error without a token")
+	}
+
+	// With the token the request is accepted.
+	withToken := client.New[resource.VPCSpec, resource.VPCStatus](srv.URL, resource.KindVPC, client.WithToken("tok"))
+	if _, err := withToken.List(ctx); err != nil {
+		t.Fatalf("list with token: %v", err)
 	}
 }
 

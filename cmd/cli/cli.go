@@ -26,7 +26,11 @@ func apiURL() string {
 }
 
 func newVPCClient() *vpcClient {
-	return client.New[resource.VPCSpec, resource.VPCStatus](apiURL(), resource.KindVPC)
+	var opts []client.Option
+	if token := os.Getenv("GOA_API_TOKEN"); token != "" {
+		opts = append(opts, client.WithToken(token))
+	}
+	return client.New[resource.VPCSpec, resource.VPCStatus](apiURL(), resource.KindVPC, opts...)
 }
 
 // run dispatches a CLI invocation. args excludes the program name.

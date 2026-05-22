@@ -27,17 +27,35 @@ const APIBase = "/api/v1"
 // Client talks to the API for a single resource kind. S is the spec type, ST
 // the status type.
 type Client[S any, ST any] struct {
-	base string
-	kind string
-	hc   *http.Client
+	base  string
+	kind  string
+	hc    *http.Client
+	token string
+}
+
+type options struct {
+	token string
+}
+
+// Option configures a Client.
+type Option func(*options)
+
+// WithToken sends "Authorization: Bearer <token>" on every request.
+func WithToken(token string) Option {
+	return func(o *options) { o.token = token }
 }
 
 // New returns a Client for kind rooted at baseURL (e.g. "http://localhost:8080").
-func New[S any, ST any](baseURL, kind string) *Client[S, ST] {
+func New[S any, ST any](baseURL, kind string, opts ...Option) *Client[S, ST] {
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
 	return &Client[S, ST]{
-		base: strings.TrimRight(baseURL, "/"),
-		kind: kind,
-		hc:   http.DefaultClient,
+		base:  strings.TrimRight(baseURL, "/"),
+		kind:  kind,
+		hc:    http.DefaultClient,
+		token: o.token,
 	}
 }
 
@@ -99,6 +117,9 @@ func (c *Client[S, ST]) do(ctx context.Context, method, url string, body, out an
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
 
 	resp, err := c.hc.Do(req)
