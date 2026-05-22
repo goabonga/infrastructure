@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Chris <goabonga@pm.me>
 
-import { getToken } from "../auth";
+import { apiRequest as request } from "./http";
 
 export interface ObjectMeta {
   uid: string;
@@ -45,29 +45,6 @@ export interface ACLPolicy {
 
 interface List<T> {
   items: T[];
-}
-
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const headers: Record<string, string> = {};
-  const token = getToken();
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
-  if (body !== undefined) {
-    headers["Content-Type"] = "application/json";
-  }
-  const resp = await fetch(`/api/v1${path}`, {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
-  if (!resp.ok) {
-    throw new Error(`${method} ${path}: ${resp.status}`);
-  }
-  if (resp.status === 204) {
-    return undefined as T;
-  }
-  return (await resp.json()) as T;
 }
 
 export async function listVPCs(): Promise<VPC[]> {
