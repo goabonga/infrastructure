@@ -28,6 +28,25 @@ func NewVPCReconciler(reg *VPCRegistry, net NetworkBackend) *VPCReconciler {
 	return &VPCReconciler{reg: reg, net: net}
 }
 
+// Name identifies the reconcile pass.
+func (r *VPCReconciler) Name() string { return resource.KindVPC }
+
+// ReconcileAll reconciles every VPC, collecting per-VPC errors.
+func (r *VPCReconciler) ReconcileAll(ctx context.Context) error {
+	vpcs, err := r.reg.List()
+	if err != nil {
+		return fmt.Errorf("manager: list vpcs: %w", err)
+	}
+	var errs []error
+	for i := range vpcs {
+		uid := vpcs[i].Metadata.UID
+		if err := r.Reconcile(ctx, uid); err != nil {
+			errs = append(errs, fmt.Errorf("vpc %s: %w", uid, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
 // Reconcile brings the VPC identified by uid in line with its spec. It is safe
 // to call repeatedly: a missing resource is a no-op, an active resource ensures
 // its bridge, and a deleting resource runs its finalizer.

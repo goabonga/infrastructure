@@ -31,7 +31,7 @@ func TestAgentReconcileOnceAll(t *testing.T) {
 		}
 	}
 
-	agent := manager.NewAgent(reg, be, time.Second, quietLogger())
+	agent := manager.NewAgent(time.Second, quietLogger(), manager.NewVPCReconciler(reg, be))
 	if err := agent.ReconcileOnce(context.Background()); err != nil {
 		t.Fatalf("reconcile once: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestAgentReconcileOnceContinuesPastErrors(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	agent := manager.NewAgent(reg, be, time.Second, quietLogger())
+	agent := manager.NewAgent(time.Second, quietLogger(), manager.NewVPCReconciler(reg, be))
 	// A per-resource failure is logged, not returned.
 	if err := agent.ReconcileOnce(context.Background()); err != nil {
 		t.Fatalf("reconcile once: %v", err)
@@ -75,7 +75,7 @@ func TestAgentReconcileOnceContinuesPastErrors(t *testing.T) {
 func TestAgentRunStopsOnContextCancel(t *testing.T) {
 	t.Parallel()
 
-	agent := manager.NewAgent(newVPCRegistry(t), newFakeBackend(), time.Hour, quietLogger())
+	agent := manager.NewAgent(time.Hour, quietLogger(), manager.NewVPCReconciler(newVPCRegistry(t), newFakeBackend()))
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 

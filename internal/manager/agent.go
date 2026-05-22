@@ -5,43 +5,40 @@ package manager
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"time"
 )
 
-// Agent reconciles every VPC in the store on a fixed interval. A single bad
-// resource is logged and skipped so it cannot stall the others.
+// ReconcilePass reconciles every resource of one kind. Implementations:
+// VPCReconciler, ACLReconciler.
+type ReconcilePass interface {
+	// Name identifies the pass in logs.
+	Name() string
+	// ReconcileAll reconciles every resource of the kind once.
+	ReconcileAll(ctx context.Context) error
+}
+
+// Agent runs a set of reconcile passes on a fixed interval. A failing pass is
+// logged and the others still run.
 type Agent struct {
-	reg      *VPCRegistry
-	rec      *VPCReconciler
+	passes   []ReconcilePass
 	interval time.Duration
 	logger   *slog.Logger
 }
 
-// NewAgent wires an Agent over reg and net. A nil logger uses slog.Default.
-func NewAgent(reg *VPCRegistry, net NetworkBackend, interval time.Duration, logger *slog.Logger) *Agent {
+// NewAgent wires an Agent over the given passes. A nil logger uses slog.Default.
+func NewAgent(interval time.Duration, logger *slog.Logger, passes ...ReconcilePass) *Agent {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Agent{
-		reg:      reg,
-		rec:      NewVPCReconciler(reg, net),
-		interval: interval,
-		logger:   logger,
-	}
+	return &Agent{passes: passes, interval: interval, logger: logger}
 }
 
-// ReconcileOnce reconciles every VPC currently in the store exactly once.
+// ReconcileOnce runs every pass once.
 func (a *Agent) ReconcileOnce(ctx context.Context) error {
-	vpcs, err := a.reg.List()
-	if err != nil {
-		return fmt.Errorf("manager: list vpcs: %w", err)
-	}
-	for i := range vpcs {
-		uid := vpcs[i].Metadata.UID
-		if err := a.rec.Reconcile(ctx, uid); err != nil {
-			a.logger.ErrorContext(ctx, "reconcile vpc", "uid", uid, "err", err)
+	for _, p := range a.passes {
+		if err := p.ReconcileAll(ctx); err != nil {
+			a.logger.ErrorContext(ctx, "reconcile pass", "pass", p.Name(), "err", err)
 		}
 	}
 	return nil
@@ -65,6 +62,6 @@ func (a *Agent) Run(ctx context.Context) error {
 
 func (a *Agent) tick(ctx context.Context) {
 	if err := a.ReconcileOnce(ctx); err != nil {
-		a.logger.ErrorContext(ctx, "reconcile pass", "err", err)
+		a.logger.ErrorContext(ctx, "reconcile tick", "err", err)
 	}
 }

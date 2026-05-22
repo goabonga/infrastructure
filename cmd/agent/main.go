@@ -39,7 +39,11 @@ func run() error {
 
 	store := state.NewFileStore(*stateDir)
 	vpcs := registry.New[resource.VPCSpec, resource.VPCStatus](store, resource.KindVPC)
-	agent := manager.NewAgent(vpcs, manager.NewExecBackend(), *interval, logger)
+	acls := registry.New[resource.ACLPolicySpec, resource.ACLPolicyStatus](store, resource.KindACLPolicy)
+	agent := manager.NewAgent(*interval, logger,
+		manager.NewVPCReconciler(vpcs, manager.NewExecBackend()),
+		manager.NewACLReconciler(acls, manager.NewExecFirewall()),
+	)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
