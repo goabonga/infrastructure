@@ -46,12 +46,12 @@ func TestProviderSchemaHasEndpoint(t *testing.T) {
 	}
 }
 
-func TestProviderRegistersVPCResource(t *testing.T) {
+func TestProviderRegistersResources(t *testing.T) {
 	t.Parallel()
 
 	p := provider.New("")()
-	if got := len(p.Resources(context.Background())); got != 1 {
-		t.Fatalf("Resources() len = %d, want 1", got)
+	if got := len(p.Resources(context.Background())); got != 12 {
+		t.Fatalf("Resources() len = %d, want 12", got)
 	}
 	if ds := p.DataSources(context.Background()); ds != nil {
 		t.Fatalf("DataSources() = %v, want nil", ds)

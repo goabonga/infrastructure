@@ -83,6 +83,17 @@ func (p *infraProvider) Configure(ctx context.Context, req provider.ConfigureReq
 func (p *infraProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		resources.NewVPCResource,
+		resources.NewSubnetResource,
+		resources.NewSecurityGroupResource,
+		resources.NewSecurityGroupRuleResource,
+		resources.NewIPAddressResource,
+		resources.NewIGWResource,
+		resources.NewRouteResource,
+		resources.NewKMSKeyringResource,
+		resources.NewKMSKeyResource,
+		resources.NewDiskResource,
+		resources.NewDiskFileResource,
+		resources.NewComputeResource,
 	}
 }
 
