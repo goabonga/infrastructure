@@ -22,7 +22,7 @@ ZENSICAL := uv tool run zensical
         build-provider build-exporter build-idp build-container-init \
         fmt vet lint test test-integration tidy check \
         license license-check \
-        docs docs-serve \
+        docs docs-gen docs-serve \
         release-plan release-validate \
         clean
 
@@ -102,6 +102,15 @@ license-check: ## Verify SPDX headers are present
 
 docs: ## Build the documentation site to site/
 	$(ZENSICAL) build --clean
+
+docs-gen: build-provider ## Generate Terraform Registry docs (requires tfplugindocs)
+	@if command -v tfplugindocs >/dev/null 2>&1; then \
+		tfplugindocs generate --provider-name infra --rendered-website-dir dist/registry-docs; \
+		echo "registry docs written to dist/registry-docs"; \
+	else \
+		echo "tfplugindocs not installed; the Zensical provider docs under docs/provider/ are maintained by hand."; \
+		echo "install: go install github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs@latest"; \
+	fi
 
 docs-serve: ## Serve the documentation site locally
 	$(ZENSICAL) serve

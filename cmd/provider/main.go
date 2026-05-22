@@ -1,16 +1,30 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Chris <goabonga@pm.me>
 
-// Command terraform-provider-infra is a placeholder entry point scaffolded in M0. The real
-// implementation lands in later milestones (see PLAN.md).
+// Command terraform-provider-infra serves the Terraform provider for the
+// control-plane API.
 package main
 
 import (
-	"fmt"
+	"context"
+	"flag"
+	"log"
 
-	"github.com/goabonga/infrastructure/internal/meta"
+	"github.com/hashicorp/terraform-plugin-framework/providerserver"
+
+	"github.com/goabonga/infrastructure/internal/provider"
 )
 
 func main() {
-	fmt.Println(meta.Line("terraform-provider-infra", Version))
+	var debug bool
+	flag.BoolVar(&debug, "debug", false, "run with debugger support (attaches a reattach provider)")
+	flag.Parse()
+
+	err := providerserver.Serve(context.Background(), provider.New(Version), providerserver.ServeOpts{
+		Address: "registry.terraform.io/goabonga/infra",
+		Debug:   debug,
+	})
+	if err != nil {
+		log.Fatalf("terraform-provider-infra: %v", err)
+	}
 }

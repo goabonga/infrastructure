@@ -27,6 +27,7 @@ nav = [
     ] },
     { "Terraform provider" = [
         { "Overview" = "provider/index.md" },
+        { "infra_vpc" = "provider/resources/vpc.md" },
     ] },
     { "Stability & deprecation" = "stability.md" },
 ]
