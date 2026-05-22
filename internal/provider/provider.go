@@ -94,6 +94,15 @@ func (p *infraProvider) Resources(_ context.Context) []func() resource.Resource 
 		resources.NewDiskResource,
 		resources.NewDiskFileResource,
 		resources.NewComputeResource,
+		resources.NewDNSZoneResource,
+		resources.NewDNSRecordResource,
+		resources.NewPeeringResource,
+		resources.NewLoadBalancerResource,
+		resources.NewLBBackendResource,
+		resources.NewWAFPolicyResource,
+		resources.NewWAFRuleResource,
+		resources.NewNodeResource,
+		resources.NewNodePoolResource,
 	}
 }
 
