@@ -124,3 +124,9 @@ type ObjectReference struct {
 	UID  string `json:"uid"`
 	Name string `json:"name"`
 }
+
+// Validator is implemented by spec types that can check their own validity.
+// The API handler calls Validate before accepting a write.
+type Validator interface {
+	Validate() error
+}
