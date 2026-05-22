@@ -87,6 +87,22 @@ func TestServerAuthGatesAPIButNotHealth(t *testing.T) {
 	}
 }
 
+func TestServerWiresACLRoutes(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(httpsrv.New(state.NewFileStore(t.TempDir())).Handler())
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/v1/acl_policy")
+	if err != nil {
+		t.Fatalf("get acl_policy collection: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("acl_policy list status = %d", resp.StatusCode)
+	}
+}
+
 func TestServerSecretRoutesDisabledByDefault(t *testing.T) {
 	t.Parallel()
 

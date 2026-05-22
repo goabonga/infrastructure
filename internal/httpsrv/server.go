@@ -61,6 +61,9 @@ func (s *Server) routes() {
 	vpcs := registry.New[resource.VPCSpec, resource.VPCStatus](s.store, resource.KindVPC)
 	handler.New(vpcs, resource.KindVPC).Register(s.mux, APIBase)
 
+	acls := registry.New[resource.ACLPolicySpec, resource.ACLPolicyStatus](s.store, resource.KindACLPolicy)
+	handler.New(acls, resource.KindACLPolicy).Register(s.mux, APIBase)
+
 	if s.kek != nil {
 		secrets := registry.New[resource.SecretSpec, resource.SecretStatus](s.store, resource.KindSecret)
 		handler.NewSecretHandler(secret.NewService(secrets, s.kek)).Register(s.mux, APIBase)
