@@ -25,7 +25,7 @@ ZENSICAL := uv tool run zensical
         fmt vet lint test test-integration tidy check \
         license license-check \
         docs docs-gen docs-serve \
-        release-plan release-validate \
+        deb release-plan release-validate \
         clean
 
 help: ## Show this help
@@ -124,6 +124,13 @@ docs-gen: build-provider ## Generate Terraform Registry docs (requires tfplugind
 
 docs-serve: ## Serve the documentation site locally
 	$(ZENSICAL) serve
+
+# ── Packaging ──────────────────────────────────────────────────────────────
+
+VERSION ?= 0.0.0
+
+deb: ## Build Debian packages into dist/ (VERSION=x.y.z, ARCH=amd64)
+	./packaging/build-debs.sh $(VERSION)
 
 # ── Release (multicz) ──────────────────────────────────────────────────────
 

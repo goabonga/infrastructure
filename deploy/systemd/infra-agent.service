@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Chris <goabonga@pm.me>
+
+[Unit]
+Description=infra per-host agent (kernel reconciliation)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# The agent drives bridges and iptables, so it needs the network admin
+# capability. It runs as root by default.
+ExecStart=/usr/local/bin/infra-agent
+Restart=on-failure
+RestartSec=5
+Environment=GOA_STATE_DIR=/var/lib/infra
+StateDirectory=infra
+AmbientCapabilities=CAP_NET_ADMIN
+
+[Install]
+WantedBy=multi-user.target
