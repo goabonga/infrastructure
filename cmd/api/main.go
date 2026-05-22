@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 
+	"github.com/goabonga/infrastructure/internal/auth"
 	"github.com/goabonga/infrastructure/internal/crypto"
 	"github.com/goabonga/infrastructure/internal/httpsrv"
 	"github.com/goabonga/infrastructure/internal/meta"
@@ -33,6 +34,18 @@ func main() {
 	} else {
 		log.Print("infra-api: GOA_KMS_KEY unset; secret routes disabled")
 	}
+
+	if spec := os.Getenv("GOA_API_TOKENS"); spec != "" {
+		tokens, err := auth.ParseTokens(spec)
+		if err != nil {
+			log.Fatalf("infra-api: GOA_API_TOKENS: %v", err)
+		}
+		opts = append(opts, httpsrv.WithAuth(auth.NewTokenAuthenticator(tokens)))
+		log.Print("infra-api: authentication enabled")
+	} else {
+		log.Print("infra-api: GOA_API_TOKENS unset; API is unauthenticated")
+	}
+
 	srv := httpsrv.New(store, opts...)
 
 	log.Printf("%s listening on %s (state dir %s)", meta.Line("infra-api", Version), *addr, *stateDir)

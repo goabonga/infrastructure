@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/goabonga/infrastructure/internal/auth"
 	"github.com/goabonga/infrastructure/internal/crypto"
 	"github.com/goabonga/infrastructure/internal/httpsrv"
 	"github.com/goabonga/infrastructure/internal/state"
@@ -43,6 +44,46 @@ func TestServerWiresVPCRoutes(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("vpc list status = %d", resp.StatusCode)
+	}
+}
+
+func TestServerAuthGatesAPIButNotHealth(t *testing.T) {
+	t.Parallel()
+
+	tokenAuth := auth.NewTokenAuthenticator(map[string]string{"tok": "alice"})
+	srv := httptest.NewServer(httpsrv.New(state.NewFileStore(t.TempDir()), httpsrv.WithAuth(tokenAuth)).Handler())
+	defer srv.Close()
+
+	// Health is open.
+	health, err := http.Get(srv.URL + "/healthz")
+	if err != nil {
+		t.Fatalf("healthz: %v", err)
+	}
+	_ = health.Body.Close()
+	if health.StatusCode != http.StatusOK {
+		t.Fatalf("healthz status = %d", health.StatusCode)
+	}
+
+	// API without a token is rejected.
+	unauth, err := http.Get(srv.URL + "/api/v1/vpc")
+	if err != nil {
+		t.Fatalf("vpc no-auth: %v", err)
+	}
+	_ = unauth.Body.Close()
+	if unauth.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("no-auth status = %d, want 401", unauth.StatusCode)
+	}
+
+	// API with the token succeeds.
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/v1/vpc", nil)
+	req.Header.Set("Authorization", "Bearer tok")
+	authed, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("vpc auth: %v", err)
+	}
+	_ = authed.Body.Close()
+	if authed.StatusCode != http.StatusOK {
+		t.Fatalf("auth status = %d, want 200", authed.StatusCode)
 	}
 }
 
