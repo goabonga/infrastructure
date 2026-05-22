@@ -1,0 +1,87 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Chris <goabonga@pm.me>
+
+package client_test
+
+import (
+	"context"
+	"errors"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/goabonga/infrastructure/internal/client"
+	"github.com/goabonga/infrastructure/internal/domain/resource"
+	"github.com/goabonga/infrastructure/internal/httpsrv"
+	"github.com/goabonga/infrastructure/internal/state"
+)
+
+func newClient(t *testing.T) *client.Client[resource.VPCSpec, resource.VPCStatus] {
+	t.Helper()
+	srv := httptest.NewServer(httpsrv.New(state.NewFileStore(t.TempDir())).Handler())
+	t.Cleanup(srv.Close)
+	return client.New[resource.VPCSpec, resource.VPCStatus](srv.URL, resource.KindVPC)
+}
+
+func TestClientRoundtrip(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	c := newClient(t)
+
+	// Missing resource.
+	if _, err := c.Get(ctx, "vpc-1"); !errors.Is(err, client.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+
+	// Create.
+	in := &resource.VPC{
+		Metadata: resource.ObjectMeta{UID: "vpc-1", Name: "prod"},
+		Spec:     resource.VPCSpec{CIDR: "10.0.0.0/16"},
+	}
+	out, err := c.Put(ctx, in)
+	if err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	if out.Metadata.Generation != 1 {
+		t.Fatalf("generation = %d, want 1", out.Metadata.Generation)
+	}
+
+	// Get.
+	got, err := c.Get(ctx, "vpc-1")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Spec.CIDR != "10.0.0.0/16" {
+		t.Fatalf("cidr = %q", got.Spec.CIDR)
+	}
+
+	// List.
+	items, err := c.List(ctx)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("list len = %d, want 1", len(items))
+	}
+
+	// Delete.
+	if err := c.Delete(ctx, "vpc-1"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if _, err := c.Get(ctx, "vpc-1"); !errors.Is(err, client.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound after delete, got %v", err)
+	}
+}
+
+func TestClientRejectsInvalidSpec(t *testing.T) {
+	t.Parallel()
+
+	c := newClient(t)
+	in := &resource.VPC{
+		Metadata: resource.ObjectMeta{UID: "vpc-bad"},
+		Spec:     resource.VPCSpec{CIDR: "not-a-cidr"},
+	}
+	if _, err := c.Put(context.Background(), in); err == nil {
+		t.Fatal("expected error for invalid spec")
+	}
+}
