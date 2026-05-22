@@ -11,6 +11,10 @@ import (
 // KindSubnet is the resource kind for subnets.
 const KindSubnet = "subnet"
 
+// SubnetFinalizer is attached by the agent so the gateway address is removed
+// from the VPC bridge before the subnet record is deleted.
+const SubnetFinalizer = "infra.io/subnet"
+
 // SubnetSpec is the desired state of a subnet within a VPC.
 type SubnetSpec struct {
 	VPCID string `json:"vpcId"`

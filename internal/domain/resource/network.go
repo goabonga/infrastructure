@@ -15,6 +15,10 @@ const (
 	KindRoute     = "route"
 )
 
+// IGWFinalizer is attached by the agent so the NAT rule is removed before the
+// internet-gateway record is deleted.
+const IGWFinalizer = "infra.io/igw"
+
 // IPAddressSpec reserves an IP address, optionally bound to a subnet/compute.
 type IPAddressSpec struct {
 	// Type is "private" or "public".
