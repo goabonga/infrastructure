@@ -35,15 +35,8 @@ func main() {
 		log.Print("infra-api: GOA_KMS_KEY unset; secret routes disabled")
 	}
 
-	if spec := os.Getenv("GOA_API_TOKENS"); spec != "" {
-		tokens, err := auth.ParseTokens(spec)
-		if err != nil {
-			log.Fatalf("infra-api: GOA_API_TOKENS: %v", err)
-		}
-		opts = append(opts, httpsrv.WithAuth(auth.NewTokenAuthenticator(tokens)))
-		log.Print("infra-api: authentication enabled")
-	} else {
-		log.Print("infra-api: GOA_API_TOKENS unset; API is unauthenticated")
+	if authn := buildAuth(); authn != nil {
+		opts = append(opts, httpsrv.WithAuth(authn))
 	}
 
 	srv := httpsrv.New(store, opts...)
@@ -52,6 +45,34 @@ func main() {
 	if err := srv.ListenAndServe(*addr); err != nil {
 		log.Fatalf("infra-api: %v", err)
 	}
+}
+
+// buildAuth selects the authenticator from the environment: a JWT verifier when
+// GOA_API_JWT_PUBKEY is set, otherwise static tokens from GOA_API_TOKENS,
+// otherwise none (the API is open).
+func buildAuth() auth.Authenticator {
+	if pubPEM := os.Getenv("GOA_API_JWT_PUBKEY"); pubPEM != "" {
+		pub, err := auth.ParseECPublicKeyPEM([]byte(pubPEM))
+		if err != nil {
+			log.Fatalf("infra-api: GOA_API_JWT_PUBKEY: %v", err)
+		}
+		issuer := os.Getenv("GOA_API_JWT_ISSUER")
+		if issuer == "" {
+			log.Fatal("infra-api: GOA_API_JWT_ISSUER is required with GOA_API_JWT_PUBKEY")
+		}
+		log.Print("infra-api: JWT authentication enabled")
+		return auth.NewJWTAuthenticator(pub, issuer)
+	}
+	if spec := os.Getenv("GOA_API_TOKENS"); spec != "" {
+		tokens, err := auth.ParseTokens(spec)
+		if err != nil {
+			log.Fatalf("infra-api: GOA_API_TOKENS: %v", err)
+		}
+		log.Print("infra-api: token authentication enabled")
+		return auth.NewTokenAuthenticator(tokens)
+	}
+	log.Print("infra-api: no auth configured; API is unauthenticated")
+	return nil
 }
 
 func envOr(key, def string) string {
