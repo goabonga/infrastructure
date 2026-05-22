@@ -127,4 +127,14 @@ func TestServerSecretRoutesEnabledWithKEK(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("put secret status = %d", resp.StatusCode)
 	}
+
+	// The SSL CA routes are wired by the same KEK option.
+	ca, err := http.Get(srv.URL + "/api/v1/ssl_ca")
+	if err != nil {
+		t.Fatalf("get ssl_ca: %v", err)
+	}
+	defer func() { _ = ca.Body.Close() }()
+	if ca.StatusCode != http.StatusOK {
+		t.Fatalf("ssl_ca list status = %d", ca.StatusCode)
+	}
 }

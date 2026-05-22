@@ -15,6 +15,7 @@ import (
 	"github.com/goabonga/infrastructure/internal/handler"
 	"github.com/goabonga/infrastructure/internal/registry"
 	"github.com/goabonga/infrastructure/internal/secret"
+	"github.com/goabonga/infrastructure/internal/ssl"
 	"github.com/goabonga/infrastructure/internal/state"
 )
 
@@ -63,6 +64,9 @@ func (s *Server) routes() {
 	if s.kek != nil {
 		secrets := registry.New[resource.SecretSpec, resource.SecretStatus](s.store, resource.KindSecret)
 		handler.NewSecretHandler(secret.NewService(secrets, s.kek)).Register(s.mux, APIBase)
+
+		cas := registry.New[resource.SSLCASpec, resource.SSLCAStatus](s.store, resource.KindSSLCA)
+		handler.NewSSLHandler(ssl.NewService(cas, s.kek)).Register(s.mux, APIBase)
 	}
 
 	s.mux.HandleFunc("GET "+healthPath, func(w http.ResponseWriter, _ *http.Request) {
