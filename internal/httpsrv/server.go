@@ -58,12 +58,23 @@ func New(store state.Store, opts ...Option) *Server {
 }
 
 func (s *Server) routes() {
-	vpcs := registry.New[resource.VPCSpec, resource.VPCStatus](s.store, resource.KindVPC)
-	handler.New(vpcs, resource.KindVPC).Register(s.mux, APIBase)
+	// Control-plane CRUD resources, served by the generic handler. The agent
+	// reconciles the kernel-backed ones (vpc, subnet, ...) out of band.
+	register[resource.VPCSpec, resource.VPCStatus](s, resource.KindVPC)
+	register[resource.SubnetSpec, resource.SubnetStatus](s, resource.KindSubnet)
+	register[resource.SecurityGroupSpec, resource.SecurityGroupStatus](s, resource.KindSecurityGroup)
+	register[resource.SecurityGroupRuleSpec, resource.SecurityGroupRuleStatus](s, resource.KindSecurityGroupRule)
+	register[resource.IPAddressSpec, resource.IPAddressStatus](s, resource.KindIPAddress)
+	register[resource.IGWSpec, resource.IGWStatus](s, resource.KindIGW)
+	register[resource.RouteSpec, resource.RouteStatus](s, resource.KindRoute)
+	register[resource.KMSKeyringSpec, resource.KMSKeyringStatus](s, resource.KindKMSKeyring)
+	register[resource.KMSKeySpec, resource.KMSKeyStatus](s, resource.KindKMSKey)
+	register[resource.DiskSpec, resource.DiskStatus](s, resource.KindDisk)
+	register[resource.DiskFileSpec, resource.DiskFileStatus](s, resource.KindDiskFile)
+	register[resource.ComputeSpec, resource.ComputeStatus](s, resource.KindCompute)
+	register[resource.ACLPolicySpec, resource.ACLPolicyStatus](s, resource.KindACLPolicy)
 
-	acls := registry.New[resource.ACLPolicySpec, resource.ACLPolicyStatus](s.store, resource.KindACLPolicy)
-	handler.New(acls, resource.KindACLPolicy).Register(s.mux, APIBase)
-
+	// Encryption-backed resources need a KEK.
 	if s.kek != nil {
 		secrets := registry.New[resource.SecretSpec, resource.SecretStatus](s.store, resource.KindSecret)
 		handler.NewSecretHandler(secret.NewService(secrets, s.kek)).Register(s.mux, APIBase)
@@ -76,6 +87,12 @@ func (s *Server) routes() {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
+}
+
+// register mounts the generic CRUD handler for a resource kind.
+func register[S any, ST any](s *Server, kind string) {
+	reg := registry.New[S, ST](s.store, kind)
+	handler.New(reg, kind).Register(s.mux, APIBase)
 }
 
 // Handler returns the routed HTTP handler. When authentication is enabled every
