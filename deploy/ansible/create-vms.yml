@@ -1,0 +1,95 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Chris <goabonga@pm.me>
+
+# Provision the test VMs on the local libvirt host from a Debian cloud image
+# plus cloud-init. Run on the machine that hosts libvirtd:
+#
+#   ansible-playbook create-vms.yml
+---
+- name: Provision libvirt test VMs
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Ensure required tools are installed
+      ansible.builtin.command: "command -v {{ item }}"
+      changed_when: false
+      loop:
+        - qemu-img
+        - virt-install
+        - cloud-localds
+        - virsh
+
+    - name: Ensure the base cloud image exists
+      ansible.builtin.stat:
+        path: "{{ base_image }}"
+      register: base_image_stat
+
+    - name: Fail when the base image is missing
+      ansible.builtin.fail:
+        msg: "Base image {{ base_image }} not found. Download a Debian 12 generic cloud qcow2 into {{ images_dir }}."
+      when: not base_image_stat.stat.exists
+
+    - name: List existing domains
+      ansible.builtin.command: "virsh --connect {{ libvirt_uri }} list --all --name"
+      register: existing_domains
+      changed_when: false
+
+    - name: Create a cloud-init working directory per VM
+      ansible.builtin.file:
+        path: "{{ images_dir }}/{{ item.name }}.ci"
+        state: directory
+        mode: "0755"
+      loop: "{{ vms }}"
+
+    - name: Render cloud-init user-data
+      ansible.builtin.template:
+        src: user-data.j2
+        dest: "{{ images_dir }}/{{ item.name }}.ci/user-data"
+        mode: "0644"
+      loop: "{{ vms }}"
+
+    - name: Render cloud-init network-config
+      ansible.builtin.template:
+        src: network-config.j2
+        dest: "{{ images_dir }}/{{ item.name }}.ci/network-config"
+        mode: "0644"
+      loop: "{{ vms }}"
+
+    - name: Create the boot overlay disk
+      ansible.builtin.command: >-
+        qemu-img create -f qcow2 -F qcow2 -b {{ base_image }}
+        {{ images_dir }}/{{ item.name }}.qcow2 {{ disk_size }}
+      args:
+        creates: "{{ images_dir }}/{{ item.name }}.qcow2"
+      loop: "{{ vms }}"
+      when: item.name not in existing_domains.stdout_lines
+
+    - name: Build the cloud-init seed ISO
+      ansible.builtin.command: >-
+        cloud-localds -N {{ images_dir }}/{{ item.name }}.ci/network-config
+        {{ images_dir }}/{{ item.name }}-seed.iso
+        {{ images_dir }}/{{ item.name }}.ci/user-data
+      args:
+        creates: "{{ images_dir }}/{{ item.name }}-seed.iso"
+      loop: "{{ vms }}"
+      when: item.name not in existing_domains.stdout_lines
+
+    - name: Define and start the domain
+      ansible.builtin.command: >-
+        virt-install --connect {{ libvirt_uri }} --name {{ item.name }}
+        --memory {{ item.memory_mb }} --vcpus {{ item.vcpus }}
+        --disk path={{ images_dir }}/{{ item.name }}.qcow2,format=qcow2,bus=virtio
+        --disk path={{ images_dir }}/{{ item.name }}-seed.iso,device=cdrom
+        --os-variant {{ os_variant }} --network network={{ network }},model=virtio
+        --graphics none --noautoconsole --import
+      loop: "{{ vms }}"
+      when: item.name not in existing_domains.stdout_lines
+
+    - name: Wait for SSH to come up
+      ansible.builtin.wait_for:
+        host: "{{ item.ip }}"
+        port: 22
+        timeout: 300
+      loop: "{{ vms }}"

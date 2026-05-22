@@ -1,0 +1,65 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Chris <goabonga@pm.me>
+
+# Install the Debian packages on the provisioned VMs and start the services.
+# Build the packages first: `make deb VERSION=<version>` (matching `version` in
+# group_vars/all.yml), then:
+#
+#   ansible-playbook site.yml
+---
+- name: Deploy the control plane
+  hosts: control
+  become: true
+  tasks:
+    - name: Copy control-plane packages
+      ansible.builtin.copy:
+        src: "{{ deb_dir }}/{{ item }}_{{ version }}_{{ deb_arch }}.deb"
+        dest: "/tmp/{{ item }}.deb"
+        mode: "0644"
+      loop: "{{ control_packages }}"
+
+    - name: Install control-plane packages
+      ansible.builtin.apt:
+        deb: "/tmp/{{ item }}.deb"
+      loop: "{{ control_packages }}"
+
+    - name: Enable and start control-plane services
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        enabled: true
+        state: started
+        daemon_reload: true
+      loop: "{{ control_services }}"
+
+    - name: Wait for the API to report healthy
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:8080/healthz"
+        status_code: 200
+      register: api_health
+      retries: 10
+      delay: 3
+      until: api_health.status == 200
+
+- name: Deploy the agents
+  hosts: agents
+  become: true
+  tasks:
+    - name: Copy agent packages
+      ansible.builtin.copy:
+        src: "{{ deb_dir }}/{{ item }}_{{ version }}_{{ deb_arch }}.deb"
+        dest: "/tmp/{{ item }}.deb"
+        mode: "0644"
+      loop: "{{ agent_packages }}"
+
+    - name: Install agent packages
+      ansible.builtin.apt:
+        deb: "/tmp/{{ item }}.deb"
+      loop: "{{ agent_packages }}"
+
+    - name: Enable and start the agent
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        enabled: true
+        state: started
+        daemon_reload: true
+      loop: "{{ agent_services }}"
