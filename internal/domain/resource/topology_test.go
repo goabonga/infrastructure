@@ -23,6 +23,15 @@ func TestTopologySpecsSatisfyValidator(t *testing.T) {
 		_ resource.Validator = resource.DiskSpec{}
 		_ resource.Validator = resource.DiskFileSpec{}
 		_ resource.Validator = resource.ComputeSpec{}
+		_ resource.Validator = resource.DNSZoneSpec{}
+		_ resource.Validator = resource.DNSRecordSpec{}
+		_ resource.Validator = resource.PeeringSpec{}
+		_ resource.Validator = resource.LoadBalancerSpec{}
+		_ resource.Validator = resource.LBBackendSpec{}
+		_ resource.Validator = resource.WAFPolicySpec{}
+		_ resource.Validator = resource.WAFRuleSpec{}
+		_ resource.Validator = resource.NodeSpec{}
+		_ resource.Validator = resource.NodePoolSpec{}
 	)
 }
 
@@ -54,6 +63,27 @@ func TestTopologyValidate(t *testing.T) {
 		{"compute no subnet", resource.ComputeSpec{Image: "nginx"}, true},
 		{"compute no image", resource.ComputeSpec{SubnetID: "sn-1"}, true},
 		{"compute bad disk", resource.ComputeSpec{SubnetID: "sn-1", Image: "nginx", Disks: []resource.ComputeDiskRef{{DiskID: "d"}}}, true},
+		{"dns zone ok", resource.DNSZoneSpec{Domain: "example.com", Visibility: "private"}, false},
+		{"dns zone no domain", resource.DNSZoneSpec{}, true},
+		{"dns zone bad visibility", resource.DNSZoneSpec{Domain: "example.com", Visibility: "dmz"}, true},
+		{"dns record ok", resource.DNSRecordSpec{ZoneID: "z-1", Name: "www", Type: "A", Records: []string{"10.0.0.5"}}, false},
+		{"dns record bad type", resource.DNSRecordSpec{ZoneID: "z-1", Type: "ZZ", Records: []string{"x"}}, true},
+		{"dns record no values", resource.DNSRecordSpec{ZoneID: "z-1", Type: "A"}, true},
+		{"peering ok", resource.PeeringSpec{VPC1ID: "vpc-1", VPC2ID: "vpc-2"}, false},
+		{"peering self", resource.PeeringSpec{VPC1ID: "vpc-1", VPC2ID: "vpc-1"}, true},
+		{"lb ok", resource.LoadBalancerSpec{VPCID: "vpc-1", Port: 443, Protocol: "tcp", Algorithm: "round_robin"}, false},
+		{"lb bad port", resource.LoadBalancerSpec{VPCID: "vpc-1", Port: 0}, true},
+		{"lb bad algo", resource.LoadBalancerSpec{VPCID: "vpc-1", Port: 80, Algorithm: "magic"}, true},
+		{"lb backend ok", resource.LBBackendSpec{LBID: "lb-1", ComputeID: "i-1", Port: 8080}, false},
+		{"lb backend no compute", resource.LBBackendSpec{LBID: "lb-1", Port: 8080}, true},
+		{"waf policy ok", resource.WAFPolicySpec{TargetType: "compute", TargetID: "i-1"}, false},
+		{"waf policy bad target", resource.WAFPolicySpec{TargetType: "host", TargetID: "i-1"}, true},
+		{"waf rule ok", resource.WAFRuleSpec{PolicyID: "w-1", MatchType: "path", Action: "block"}, false},
+		{"waf rule ratelimit no limit", resource.WAFRuleSpec{PolicyID: "w-1", MatchType: "path", Action: "ratelimit"}, true},
+		{"node ok", resource.NodeSpec{Hostname: "h1", Address: "10.0.0.2", Capacity: resource.NodeCapacity{CPUs: 4, MemoryMB: 8192}}, false},
+		{"node no capacity", resource.NodeSpec{Hostname: "h1", Address: "10.0.0.2"}, true},
+		{"node pool ok", resource.NodePoolSpec{Name: "default", MinNodes: 1, MaxNodes: 3}, false},
+		{"node pool bad range", resource.NodePoolSpec{Name: "default", MinNodes: 5, MaxNodes: 2}, true},
 	}
 	for _, tc := range tests {
 		tc := tc
