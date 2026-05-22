@@ -103,7 +103,9 @@ post_bump = ["go mod tidy"]
 # ── Identity ──────────────────────────────────────────────────────────────
 
 [components.infra-idp]
-paths = ["cmd/idp/**", "internal/idp/**", "internal/auth/**"]
+# internal/auth is shared core (consumed by the API too), so it is intentionally
+# not owned here; it is added back when the IDP itself is built.
+paths = ["cmd/idp/**", "internal/idp/**"]
 bump_files = [
     { file = "cmd/idp/version.go", key = "regex:Version\\s*=\\s*\"([^\"]+)\"" },
 ]
