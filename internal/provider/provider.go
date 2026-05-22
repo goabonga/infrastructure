@@ -8,6 +8,7 @@ package provider
 
 import (
 	"context"
+	"os"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
@@ -42,6 +43,7 @@ func (p *infraProvider) Metadata(_ context.Context, _ provider.MetadataRequest, 
 
 type providerModel struct {
 	Endpoint types.String `tfsdk:"endpoint"`
+	Token    types.String `tfsdk:"token"`
 }
 
 func (p *infraProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
@@ -51,6 +53,11 @@ func (p *infraProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp
 			"endpoint": schema.StringAttribute{
 				Optional:            true,
 				MarkdownDescription: "Base URL of the API (default " + defaultEndpoint + ").",
+			},
+			"token": schema.StringAttribute{
+				Optional:            true,
+				Sensitive:           true,
+				MarkdownDescription: "Bearer token for the API. Falls back to the GOA_API_TOKEN environment variable.",
 			},
 		},
 	}
@@ -66,8 +73,11 @@ func (p *infraProvider) Configure(ctx context.Context, req provider.ConfigureReq
 	if !cfg.Endpoint.IsNull() && cfg.Endpoint.ValueString() != "" {
 		endpoint = cfg.Endpoint.ValueString()
 	}
-	// Resources build their own typed client from the endpoint string.
-	resp.ResourceData = endpoint
+	token := os.Getenv("GOA_API_TOKEN")
+	if !cfg.Token.IsNull() && cfg.Token.ValueString() != "" {
+		token = cfg.Token.ValueString()
+	}
+	resp.ResourceData = resources.ProviderConfig{Endpoint: endpoint, Token: token}
 }
 
 func (p *infraProvider) Resources(_ context.Context) []func() resource.Resource {

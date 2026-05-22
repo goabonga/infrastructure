@@ -37,6 +37,13 @@ func TestProviderSchemaHasEndpoint(t *testing.T) {
 	if _, ok := resp.Schema.Attributes["endpoint"]; !ok {
 		t.Fatalf("schema missing endpoint attribute: %+v", resp.Schema.Attributes)
 	}
+	tok, ok := resp.Schema.Attributes["token"]
+	if !ok {
+		t.Fatalf("schema missing token attribute: %+v", resp.Schema.Attributes)
+	}
+	if !tok.IsSensitive() {
+		t.Fatal("token attribute should be sensitive")
+	}
 }
 
 func TestProviderRegistersVPCResource(t *testing.T) {

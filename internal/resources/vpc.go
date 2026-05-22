@@ -89,15 +89,19 @@ func (r *vpcResource) Configure(_ context.Context, req resource.ConfigureRequest
 	if req.ProviderData == nil {
 		return // provider not configured yet
 	}
-	endpoint, ok := req.ProviderData.(string)
+	cfg, ok := req.ProviderData.(ProviderConfig)
 	if !ok {
 		resp.Diagnostics.AddError(
 			"Unexpected provider data",
-			fmt.Sprintf("expected the API endpoint as a string, got %T", req.ProviderData),
+			fmt.Sprintf("expected ProviderConfig, got %T", req.ProviderData),
 		)
 		return
 	}
-	r.client = client.New[infra.VPCSpec, infra.VPCStatus](endpoint, infra.KindVPC)
+	var opts []client.Option
+	if cfg.Token != "" {
+		opts = append(opts, client.WithToken(cfg.Token))
+	}
+	r.client = client.New[infra.VPCSpec, infra.VPCStatus](cfg.Endpoint, infra.KindVPC, opts...)
 }
 
 func (r *vpcResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
