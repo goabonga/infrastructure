@@ -19,6 +19,15 @@ export const KINDS = [
   "disk_file",
   "compute",
   "acl_policy",
+  "dns_zone",
+  "dns_record",
+  "peering",
+  "load_balancer",
+  "lb_backend",
+  "waf_policy",
+  "waf_rule",
+  "node",
+  "node_pool",
 ] as const;
 
 export interface GenericResource {
