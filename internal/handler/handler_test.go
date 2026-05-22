@@ -156,6 +156,35 @@ func TestHandlerRejectsBadInput(t *testing.T) {
 	}
 }
 
+func TestHandlerSoftDeleteWithFinalizer(t *testing.T) {
+	t.Parallel()
+
+	mux, reg := newMux(t)
+
+	// Seed a resource that already carries a finalizer (as the agent would add).
+	seed := &resource.VPC{
+		Metadata: resource.ObjectMeta{UID: "vpc-1", Finalizers: []string{resource.VPCFinalizer}},
+		Spec:     resource.VPCSpec{CIDR: "10.0.0.0/16"},
+	}
+	if err := reg.Put(seed); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	rec := do(t, mux, http.MethodDelete, "/api/v1/vpc/vpc-1", nil)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("delete status = %d, want 202", rec.Code)
+	}
+
+	// The record stays until the finalizer is cleared, now marked for deletion.
+	got, err := reg.Get("vpc-1")
+	if err != nil {
+		t.Fatalf("get after soft delete: %v", err)
+	}
+	if !got.Metadata.IsDeleting() {
+		t.Fatal("expected DeletionTimestamp to be set")
+	}
+}
+
 func mustDecode(t *testing.T, rec *httptest.ResponseRecorder, v any) {
 	t.Helper()
 	if err := json.NewDecoder(rec.Body).Decode(v); err != nil {

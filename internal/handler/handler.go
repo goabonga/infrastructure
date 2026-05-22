@@ -113,11 +113,35 @@ func (h *Handler[S, ST]) put(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler[S, ST]) delete(w http.ResponseWriter, r *http.Request) {
-	if err := h.reg.Delete(r.PathValue("uid")); err != nil {
+	uid := r.PathValue("uid")
+	existing, err := h.reg.Get(uid)
+	switch {
+	case errors.Is(err, state.ErrNotFound):
+		w.WriteHeader(http.StatusNoContent) // delete is idempotent
+		return
+	case err != nil:
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+
+	// With no finalizers the record can go immediately; otherwise mark it for
+	// deletion and let the controllers run their finalizers first.
+	if len(existing.Metadata.Finalizers) == 0 {
+		if err := h.reg.Delete(uid); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	now := h.now()
+	existing.Metadata.DeletionTimestamp = &now
+	if err := h.reg.Put(existing); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, existing)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
