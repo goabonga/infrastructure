@@ -1,0 +1,39 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Chris <goabonga@pm.me>
+
+package resource
+
+import "fmt"
+
+// KindSSLCA is the resource kind for SSL certificate authorities.
+const KindSSLCA = "ssl_ca"
+
+// SSLCASpec is the desired state of a certificate authority.
+type SSLCASpec struct {
+	CommonName   string `json:"commonName"`
+	Organization string `json:"organization,omitempty"`
+	// ValidDays is the CA lifetime; zero means the server default.
+	ValidDays int `json:"validDays,omitempty"`
+}
+
+// Validate reports whether the spec is well-formed for a write.
+func (s SSLCASpec) Validate() error {
+	if s.CommonName == "" {
+		return fmt.Errorf("ssl_ca: commonName is required")
+	}
+	if s.ValidDays < 0 {
+		return fmt.Errorf("ssl_ca: validDays must not be negative")
+	}
+	return nil
+}
+
+// SSLCAStatus is the observed state of a CA. CertPEM is public; EncryptedKey is
+// the envelope-encrypted private key, never returned in clear.
+type SSLCAStatus struct {
+	StatusBase
+	CertPEM      []byte `json:"certPem,omitempty"`
+	EncryptedKey []byte `json:"encryptedKey,omitempty"`
+}
+
+// SSLCA is a certificate authority resource.
+type SSLCA = Resource[SSLCASpec, SSLCAStatus]
