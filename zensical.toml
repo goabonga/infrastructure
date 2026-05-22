@@ -21,6 +21,7 @@ nav = [
     { "Architecture" = [
         { "Overview" = "architecture/overview.md" },
         { "Resource model" = "architecture/resource-model.md" },
+        { "Realization" = "architecture/realization.md" },
     ] },
     { "Operations" = [
         { "Deployment" = "operations/deploy.md" },

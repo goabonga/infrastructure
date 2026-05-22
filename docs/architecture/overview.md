@@ -27,7 +27,8 @@ infra-exporter (metrics) <- controller-manager
 ## Data plane
 
 - **infra-agent** runs on each host, watches the resources assigned to it and
-  reconciles them against the kernel.
+  reconciles them against the kernel. See [realization](realization.md) for how a
+  declared topology becomes bridges, namespaces, cgroups and encrypted disks.
 
 ## State
 
