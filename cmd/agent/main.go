@@ -31,13 +31,17 @@ func main() {
 
 func run() error {
 	stateDir := flag.String("state-dir", envOr("GOA_STATE_DIR", "./state"), "state directory")
+	stateDSN := flag.String("state-dsn", envOr("GOA_STATE_DSN", ""), "PostgreSQL DSN (enables the HA backend)")
 	interval := flag.Duration("interval", 5*time.Second, "reconcile interval")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	logger.Info(meta.Line("infra-agent", Version), "stateDir", *stateDir, "interval", interval.String())
 
-	store := state.NewFileStore(*stateDir)
+	store, err := state.Open(*stateDir, *stateDSN)
+	if err != nil {
+		return err
+	}
 	vpcs := registry.New[resource.VPCSpec, resource.VPCStatus](store, resource.KindVPC)
 	acls := registry.New[resource.ACLPolicySpec, resource.ACLPolicyStatus](store, resource.KindACLPolicy)
 	agent := manager.NewAgent(*interval, logger,

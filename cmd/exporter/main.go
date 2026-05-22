@@ -23,9 +23,13 @@ import (
 func main() {
 	addr := flag.String("addr", envOr("GOA_EXPORTER_ADDR", ":9100"), "listen address")
 	stateDir := flag.String("state-dir", envOr("GOA_STATE_DIR", "./state"), "state directory")
+	stateDSN := flag.String("state-dsn", envOr("GOA_STATE_DSN", ""), "PostgreSQL DSN (enables the HA backend)")
 	flag.Parse()
 
-	store := state.NewFileStore(*stateDir)
+	store, err := state.Open(*stateDir, *stateDSN)
+	if err != nil {
+		log.Fatalf("infra-exporter: open state: %v", err)
+	}
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(metrics.NewCollector(store,
 		resource.KindVPC,

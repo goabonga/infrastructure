@@ -32,6 +32,7 @@ func main() {
 
 func run() error {
 	stateDir := flag.String("state-dir", envOr("GOA_STATE_DIR", "./state"), "state directory")
+	stateDSN := flag.String("state-dsn", envOr("GOA_STATE_DSN", ""), "PostgreSQL DSN (enables the HA backend)")
 	interval := flag.Duration("interval", 5*time.Second, "reconcile interval")
 	ttl := flag.Duration("lease-ttl", 15*time.Second, "leader lease TTL")
 	flag.Parse()
@@ -39,7 +40,10 @@ func run() error {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	logger.Info(meta.Line("infra-controller-manager", Version), "stateDir", *stateDir, "interval", interval.String())
 
-	store := state.NewFileStore(*stateDir)
+	store, err := state.Open(*stateDir, *stateDSN)
+	if err != nil {
+		return err
+	}
 	vpcs := registry.New[resource.VPCSpec, resource.VPCStatus](store, resource.KindVPC)
 
 	lease := controllers.NewLease(store, "leases/controller-manager", holderID(), *ttl, nil)
