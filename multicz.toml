@@ -115,7 +115,7 @@ post_bump = ["go mod tidy"]
 # ── Observability ─────────────────────────────────────────────────────────
 
 [components.infra-exporter]
-paths = ["cmd/exporter/**"]
+paths = ["cmd/exporter/**", "internal/metrics/**"]
 bump_files = [
     { file = "cmd/exporter/version.go", key = "regex:Version\\s*=\\s*\"([^\"]+)\"" },
 ]
