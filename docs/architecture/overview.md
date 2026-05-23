@@ -32,7 +32,12 @@ infra-exporter (metrics) <- controller-manager
 
 ## State
 
-The store is pluggable: a file backend for single-host development, etcd for
-multi-host clusters, and Postgres for identity data.
+The store is pluggable and selected through a single DSN
+(`GOA_STATE_DSN` / `-state-dsn`): an `etcd://ep1,ep2,...` DSN uses etcd, any
+other non-empty DSN uses PostgreSQL, and an empty DSN falls back to a local
+file store. Both etcd and PostgreSQL are highly available, multi-instance
+backends suitable for multi-host clusters (every component must share one);
+the file backend is for single-host development. Every backend offers the same
+contract, including an atomic compare-and-swap used for leader election.
 
 See the [resource model](resource-model.md) for the spec/status contract.
