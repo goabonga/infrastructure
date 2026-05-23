@@ -11,6 +11,10 @@ const (
 	KindWAFRule   = "waf_rule"
 )
 
+// WAFPolicyFinalizer is attached by the agent so the iptables chain and its
+// attachment to the target are removed before the policy record is deleted.
+const WAFPolicyFinalizer = "infra.io/waf-policy"
+
 // WAFPolicySpec is the desired state of a web-application-firewall policy
 // attached to an internet gateway, subnet or compute instance.
 type WAFPolicySpec struct {
