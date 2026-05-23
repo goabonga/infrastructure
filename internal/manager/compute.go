@@ -555,12 +555,16 @@ type ComputeReconciler struct {
 	disks   *DiskRegistry
 	sgs     *SecurityGroupRegistry
 	backend ComputeBackend
+	// nodeName scopes realization to compute scheduled to this node. When empty
+	// the reconciler realizes every compute (single-host mode).
+	nodeName string
 }
 
 // NewComputeReconciler returns a reconciler backed by the resource stores and
-// the compute backend.
-func NewComputeReconciler(reg *ComputeRegistry, subnets *SubnetRegistry, vpcs *VPCRegistry, disks *DiskRegistry, sgs *SecurityGroupRegistry, backend ComputeBackend) *ComputeReconciler {
-	return &ComputeReconciler{reg: reg, subnets: subnets, vpcs: vpcs, disks: disks, sgs: sgs, backend: backend}
+// the compute backend. nodeName scopes realization to compute scheduled to this
+// node; an empty nodeName realizes every compute.
+func NewComputeReconciler(reg *ComputeRegistry, subnets *SubnetRegistry, vpcs *VPCRegistry, disks *DiskRegistry, sgs *SecurityGroupRegistry, backend ComputeBackend, nodeName string) *ComputeReconciler {
+	return &ComputeReconciler{reg: reg, subnets: subnets, vpcs: vpcs, disks: disks, sgs: sgs, backend: backend, nodeName: nodeName}
 }
 
 // Name identifies the reconcile pass.
@@ -590,6 +594,10 @@ func (r *ComputeReconciler) Reconcile(ctx context.Context, uid string) error {
 	}
 	if err != nil {
 		return fmt.Errorf("manager: load compute %q: %w", uid, err)
+	}
+	if r.nodeName != "" && c.Status.NodeName != r.nodeName {
+		// Scheduled to another node (or not yet scheduled); leave it alone.
+		return nil
 	}
 	if c.Metadata.IsDeleting() {
 		return r.finalize(ctx, c)

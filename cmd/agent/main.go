@@ -77,7 +77,7 @@ func run() error {
 		manager.NewDiskReconciler(disks, manager.NewExecDiskBackend(filepath.Join(*stateDir, "disks")), master),
 		manager.NewSecurityGroupReconciler(sgs, sgRules, manager.NewExecSecurityGroup()),
 		manager.NewACLReconciler(acls, manager.NewExecFirewall()),
-		manager.NewComputeReconciler(computes, subnets, vpcs, disks, sgs, manager.NewExecComputeBackend(*stateDir)),
+		manager.NewComputeReconciler(computes, subnets, vpcs, disks, sgs, manager.NewExecComputeBackend(*stateDir), os.Getenv("GOA_NODE_ID")),
 		manager.NewWAFReconciler(wafPolicies, wafRules, computes, subnets, igws, vpcs, manager.NewExecWAF()),
 		manager.NewLoadBalancerReconciler(lbs, lbBackends, computes, vpcs, manager.NewExecLB()),
 	)

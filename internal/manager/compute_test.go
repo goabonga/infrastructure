@@ -69,7 +69,7 @@ func newComputeEnv(t *testing.T) *computeEnv {
 }
 
 func (env *computeEnv) reconciler(be manager.ComputeBackend) *manager.ComputeReconciler {
-	return manager.NewComputeReconciler(env.computes, env.subnets, env.vpcs, env.disks, env.sgs, be)
+	return manager.NewComputeReconciler(env.computes, env.subnets, env.vpcs, env.disks, env.sgs, be, "")
 }
 
 func (env *computeEnv) putCompute(t *testing.T, c *resource.Compute) {
@@ -138,6 +138,32 @@ func TestComputeReconcileSuccess(t *testing.T) {
 	}
 	if len(req.Disks) != 1 || req.Disks[0].Source != "/dev/mapper/infra-d1" || req.Disks[0].Target != "/data" {
 		t.Fatalf("disk mount not resolved: %+v", req.Disks)
+	}
+}
+
+func TestComputeNodeScoping(t *testing.T) {
+	t.Parallel()
+
+	env := newComputeEnv(t)
+	mine := basicCompute("i-mine")
+	mine.Status.NodeName = "node-a"
+	env.putCompute(t, mine)
+	other := basicCompute("i-other")
+	other.Status.NodeName = "node-b"
+	env.putCompute(t, other)
+
+	be := &fakeComputeBackend{}
+	rec := manager.NewComputeReconciler(env.computes, env.subnets, env.vpcs, env.disks, env.sgs, be, "node-a")
+	for _, uid := range []string{"i-mine", "i-other"} {
+		if err := rec.Reconcile(context.Background(), uid); err != nil {
+			t.Fatalf("reconcile %s: %v", uid, err)
+		}
+	}
+	if len(be.ensured) != 1 || be.ensured[0].UID != "i-mine" {
+		t.Fatalf("only compute scheduled to node-a should be realized: %+v", be.ensured)
+	}
+	if got, _ := env.computes.Get("i-other"); got.Status.Ready {
+		t.Fatal("compute on another node should be left alone")
 	}
 }
 
