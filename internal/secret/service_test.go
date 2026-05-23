@@ -22,8 +22,10 @@ func newService(t *testing.T) *secret.Service {
 	if err != nil {
 		t.Fatalf("kek: %v", err)
 	}
-	reg := registry.New[resource.SecretSpec, resource.SecretStatus](state.NewFileStore(t.TempDir()), resource.KindSecret)
-	return secret.NewService(reg, kek)
+	store := state.NewFileStore(t.TempDir())
+	reg := registry.New[resource.SecretSpec, resource.SecretStatus](store, resource.KindSecret)
+	versions := registry.New[resource.SecretVersionSpec, resource.SecretVersionStatus](store, resource.KindSecretVersion)
+	return secret.NewService(reg, versions, kek)
 }
 
 func TestSecretPutRedactsAndReveals(t *testing.T) {
@@ -58,6 +60,60 @@ func TestSecretPutRedactsAndReveals(t *testing.T) {
 	}
 }
 
+func TestSecretVersionsIncrementAndReveal(t *testing.T) {
+	t.Parallel()
+
+	svc := newService(t)
+	v1, err := svc.AddVersion("ver-1", "sec-1", "first")
+	if err != nil {
+		t.Fatalf("add v1: %v", err)
+	}
+	if v1.Status.Version != 1 {
+		t.Fatalf("version = %d, want 1", v1.Status.Version)
+	}
+	if v1.Spec.Data != "" || v1.Status.Ciphertext != nil {
+		t.Fatalf("version response leaks material: %+v", v1)
+	}
+	v2, err := svc.AddVersion("ver-2", "sec-1", "second")
+	if err != nil {
+		t.Fatalf("add v2: %v", err)
+	}
+	if v2.Status.Version != 2 {
+		t.Fatalf("version = %d, want 2", v2.Status.Version)
+	}
+	// A version of a different secret restarts numbering.
+	other, err := svc.AddVersion("ver-3", "sec-2", "x")
+	if err != nil {
+		t.Fatalf("add other: %v", err)
+	}
+	if other.Status.Version != 1 {
+		t.Fatalf("other version = %d, want 1", other.Status.Version)
+	}
+
+	list, err := svc.ListVersions("sec-1")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(list) != 2 || list[0].Status.Version != 1 || list[1].Status.Version != 2 {
+		t.Fatalf("unexpected version list: %+v", list)
+	}
+
+	plain, err := svc.RevealVersion("ver-2")
+	if err != nil {
+		t.Fatalf("reveal: %v", err)
+	}
+	if plain != "second" {
+		t.Fatalf("revealed %q, want second", plain)
+	}
+
+	if err := svc.DeleteVersion("ver-1"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if _, err := svc.GetVersion("ver-1"); !errors.Is(err, state.ErrNotFound) {
+		t.Fatalf("version should be gone, got %v", err)
+	}
+}
+
 func TestSecretNotStoredInClear(t *testing.T) {
 	t.Parallel()
 
@@ -65,7 +121,8 @@ func TestSecretNotStoredInClear(t *testing.T) {
 	kek, _ := crypto.NewKEK(key)
 	store := state.NewFileStore(t.TempDir())
 	reg := registry.New[resource.SecretSpec, resource.SecretStatus](store, resource.KindSecret)
-	svc := secret.NewService(reg, kek)
+	versions := registry.New[resource.SecretVersionSpec, resource.SecretVersionStatus](store, resource.KindSecretVersion)
+	svc := secret.NewService(reg, versions, kek)
 
 	if _, err := svc.Put("sec-1", "", "p@ssw0rd-plaintext"); err != nil {
 		t.Fatalf("put: %v", err)

@@ -23,9 +23,11 @@ func newSecretMux(t *testing.T) *http.ServeMux {
 	if err != nil {
 		t.Fatalf("kek: %v", err)
 	}
-	reg := registry.New[resource.SecretSpec, resource.SecretStatus](state.NewFileStore(t.TempDir()), resource.KindSecret)
+	store := state.NewFileStore(t.TempDir())
+	reg := registry.New[resource.SecretSpec, resource.SecretStatus](store, resource.KindSecret)
+	versions := registry.New[resource.SecretVersionSpec, resource.SecretVersionStatus](store, resource.KindSecretVersion)
 	mux := http.NewServeMux()
-	handler.NewSecretHandler(secret.NewService(reg, kek)).Register(mux, "/api/v1")
+	handler.NewSecretHandler(secret.NewService(reg, versions, kek)).Register(mux, "/api/v1")
 	return mux
 }
 

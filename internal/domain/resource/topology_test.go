@@ -32,6 +32,7 @@ func TestTopologySpecsSatisfyValidator(t *testing.T) {
 		_ resource.Validator = resource.WAFRuleSpec{}
 		_ resource.Validator = resource.NodeSpec{}
 		_ resource.Validator = resource.NodePoolSpec{}
+		_ resource.Validator = resource.SecretVersionSpec{}
 	)
 }
 
@@ -84,6 +85,9 @@ func TestTopologyValidate(t *testing.T) {
 		{"node no capacity", resource.NodeSpec{Hostname: "h1", Address: "10.0.0.2"}, true},
 		{"node pool ok", resource.NodePoolSpec{Name: "default", MinNodes: 1, MaxNodes: 3}, false},
 		{"node pool bad range", resource.NodePoolSpec{Name: "default", MinNodes: 5, MaxNodes: 2}, true},
+		{"secret version ok", resource.SecretVersionSpec{SecretID: "sec-1", Data: "x"}, false},
+		{"secret version no secret", resource.SecretVersionSpec{Data: "x"}, true},
+		{"secret version no data", resource.SecretVersionSpec{SecretID: "sec-1"}, true},
 	}
 	for _, tc := range tests {
 		tc := tc

@@ -31,3 +31,34 @@ type SecretStatus struct {
 
 // Secret is an encrypted-at-rest secret resource.
 type Secret = Resource[SecretSpec, SecretStatus]
+
+// KindSecretVersion is the resource kind for secret versions.
+const KindSecretVersion = "secret_version"
+
+// SecretVersionSpec is one immutable, encrypted-at-rest version of a secret's
+// data. Data carries the plaintext on write only.
+type SecretVersionSpec struct {
+	SecretID string `json:"secretId"`
+	Data     string `json:"data,omitempty"`
+}
+
+// Validate reports whether the spec is well-formed for a write.
+func (s SecretVersionSpec) Validate() error {
+	if s.SecretID == "" {
+		return fmt.Errorf("secret_version: secretId is required")
+	}
+	if s.Data == "" {
+		return fmt.Errorf("secret_version: data is required")
+	}
+	return nil
+}
+
+// SecretVersionStatus is the observed state of a secret version.
+type SecretVersionStatus struct {
+	StatusBase
+	Version    int    `json:"version,omitempty"`
+	Ciphertext []byte `json:"ciphertext,omitempty"`
+}
+
+// SecretVersion is one encrypted version of a secret.
+type SecretVersion = Resource[SecretVersionSpec, SecretVersionStatus]

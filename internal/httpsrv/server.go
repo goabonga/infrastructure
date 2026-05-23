@@ -86,7 +86,8 @@ func (s *Server) routes() {
 	// Encryption-backed resources need a KEK.
 	if s.kek != nil {
 		secrets := registry.New[resource.SecretSpec, resource.SecretStatus](s.store, resource.KindSecret)
-		handler.NewSecretHandler(secret.NewService(secrets, s.kek)).Register(s.mux, APIBase)
+		secretVersions := registry.New[resource.SecretVersionSpec, resource.SecretVersionStatus](s.store, resource.KindSecretVersion)
+		handler.NewSecretHandler(secret.NewService(secrets, secretVersions, s.kek)).Register(s.mux, APIBase)
 
 		cas := registry.New[resource.SSLCASpec, resource.SSLCAStatus](s.store, resource.KindSSLCA)
 		handler.NewSSLHandler(ssl.NewService(cas, s.kek)).Register(s.mux, APIBase)
