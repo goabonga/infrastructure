@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Chris <goabonga@pm.me>
+[Service]
+EnvironmentFile={{ infra_conf_dir }}/api.env
+ExecStart=
+ExecStart=/bin/sh -c 'export GOA_API_JWT_PUBKEY="$(cat {{ infra_conf_dir }}/jwt-es256.pub)"; exec /usr/local/bin/infra-api'

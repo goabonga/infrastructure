@@ -1,0 +1,83 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Chris <goabonga@pm.me>
+---
+- name: Copy control-plane packages
+  ansible.builtin.copy:
+    src: "{{ deb_dir }}/{{ item }}_{{ version }}_{{ deb_arch }}.deb"
+    dest: "/tmp/{{ item }}.deb"
+    mode: "0644"
+  loop: "{{ control_packages }}"
+
+- name: Install control-plane packages
+  ansible.builtin.apt:
+    deb: "/tmp/{{ item }}.deb"
+  loop: "{{ control_packages }}"
+
+- name: Ensure the control-plane drop-in directories exist
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ item }}.service.d"
+    state: directory
+    mode: "0755"
+  loop:
+    - infra-api
+    - infra-controller-manager
+    - infra-exporter
+
+- name: Deploy the JWT verification public key
+  ansible.builtin.copy:
+    src: "{{ jwt_pub_file }}"
+    dest: "{{ infra_conf_dir }}/jwt-es256.pub"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart infra-api
+
+- name: Write the API environment file
+  ansible.builtin.template:
+    src: api.env.j2
+    dest: "{{ infra_conf_dir }}/api.env"
+    owner: root
+    group: root
+    mode: "0640"
+  notify: Restart infra-api
+
+- name: Write the shared state environment file
+  ansible.builtin.template:
+    src: state.env.j2
+    dest: "{{ infra_conf_dir }}/state.env"
+    owner: root
+    group: root
+    mode: "0640"
+  notify:
+    - Restart infra-controller-manager
+    - Restart infra-exporter
+
+- name: Install the infra-api systemd drop-in
+  ansible.builtin.template:
+    src: infra-api.override.conf.j2
+    dest: /etc/systemd/system/infra-api.service.d/override.conf
+    mode: "0644"
+  notify: Restart infra-api
+
+- name: Install the controller-manager and exporter drop-ins
+  ansible.builtin.template:
+    src: state.override.conf.j2
+    dest: "/etc/systemd/system/{{ item }}.service.d/override.conf"
+    mode: "0644"
+  loop:
+    - infra-controller-manager
+    - infra-exporter
+  notify:
+    - Restart infra-controller-manager
+    - Restart infra-exporter
+
+- name: Enable and start control-plane services
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  loop:
+    - infra-api
+    - infra-controller-manager
+    - infra-exporter
