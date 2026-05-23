@@ -1,0 +1,83 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Chris <goabonga@pm.me>
+---
+- name: Copy agent packages
+  ansible.builtin.copy:
+    src: "{{ deb_dir }}/{{ item }}_{{ version }}_{{ deb_arch }}.deb"
+    dest: "/tmp/{{ item }}.deb"
+    mode: "0644"
+  loop: "{{ agent_packages }}"
+
+- name: Install agent packages
+  ansible.builtin.apt:
+    deb: "/tmp/{{ item }}.deb"
+  loop: "{{ agent_packages }}"
+
+- name: Ensure the infra-agent drop-in directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/system/infra-agent.service.d
+    state: directory
+    mode: "0755"
+
+- name: Write the agent environment file
+  ansible.builtin.template:
+    src: agent.env.j2
+    dest: "{{ infra_conf_dir }}/agent.env"
+    owner: root
+    group: root
+    mode: "0640"
+  notify: Restart infra-agent
+
+- name: Install the infra-agent systemd drop-in
+  ansible.builtin.template:
+    src: infra-agent.override.conf.j2
+    dest: /etc/systemd/system/infra-agent.service.d/override.conf
+    mode: "0644"
+  notify: Restart infra-agent
+
+- name: Enable and start infra-agent
+  ansible.builtin.systemd_service:
+    name: infra-agent
+    enabled: true
+    state: started
+    daemon_reload: true
+
+# Register this host as a schedulable node (UID == GOA_NODE_ID), so the
+# controller-manager's scheduler can place compute onto it. The node id is the
+# inventory hostname, which the agent reports via GOA_NODE_ID.
+- name: Obtain an IdP access token for node registration
+  ansible.builtin.uri:
+    url: "{{ idp_issuer }}/token"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      grant_type: client_credentials
+      client_id: "{{ idp_client_id }}"
+      client_secret: "{{ lookup('file', idp_client_secret_file) | trim }}"
+    status_code: 200
+  delegate_to: localhost
+  become: false
+  register: agent_node_token
+
+- name: Register this host as a node
+  ansible.builtin.uri:
+    url: "http://{{ control_ip }}:{{ api_addr | regex_replace('^:', '') }}/api/v1/node/{{ inventory_hostname }}"
+    method: PUT
+    headers:
+      Authorization: "Bearer {{ agent_node_token.json.access_token }}"
+    body_format: json
+    body:
+      metadata:
+        uid: "{{ inventory_hostname }}"
+      spec:
+        hostname: "{{ inventory_hostname }}"
+        address: "{{ ansible_host }}"
+        labels:
+          role: agent
+        capacity:
+          cpus: "{{ (vms | selectattr('name', 'equalto', inventory_hostname) | first).vcpus | int }}"
+          memoryMb: "{{ (vms | selectattr('name', 'equalto', inventory_hostname) | first).memory_mb | int }}"
+          maxPods: 32
+    status_code: [200, 201]
+  delegate_to: localhost
+  become: false
