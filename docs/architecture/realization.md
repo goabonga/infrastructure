@@ -48,6 +48,7 @@ run as root.
 | VPC              | a Linux bridge (`br-<uid>`) |
 | Subnet           | the gateway address on the VPC bridge |
 | Internet gateway | IPv4 forwarding + a MASQUERADE rule for the VPC CIDR |
+| Peering          | a veth pair joining the two VPC bridges |
 | Disk             | a backing image, optionally dm-crypt (LUKS) encrypted |
 | Security group   | an allow-list iptables chain |
 | Compute          | a network namespace running an OCI image |
