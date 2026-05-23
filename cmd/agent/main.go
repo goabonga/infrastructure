@@ -64,11 +64,14 @@ func run() error {
 	peerings := registry.New[resource.PeeringSpec, resource.PeeringStatus](store, resource.KindPeering)
 	wafPolicies := registry.New[resource.WAFPolicySpec, resource.WAFPolicyStatus](store, resource.KindWAFPolicy)
 	wafRules := registry.New[resource.WAFRuleSpec, resource.WAFRuleStatus](store, resource.KindWAFRule)
+	dnsZones := registry.New[resource.DNSZoneSpec, resource.DNSZoneStatus](store, resource.KindDNSZone)
+	dnsRecords := registry.New[resource.DNSRecordSpec, resource.DNSRecordStatus](store, resource.KindDNSRecord)
 	agent := manager.NewAgent(*interval, logger,
 		manager.NewVPCReconciler(vpcs, net),
 		manager.NewSubnetReconciler(subnets, vpcs, net),
 		manager.NewIGWReconciler(igws, vpcs, net),
 		manager.NewPeeringReconciler(peerings, vpcs, manager.NewExecPeering()),
+		manager.NewDNSReconciler(dnsZones, dnsRecords, vpcs, manager.NewExecDNS(filepath.Join(*stateDir, "dns"))),
 		manager.NewDiskReconciler(disks, manager.NewExecDiskBackend(filepath.Join(*stateDir, "disks")), master),
 		manager.NewSecurityGroupReconciler(sgs, sgRules, manager.NewExecSecurityGroup()),
 		manager.NewACLReconciler(acls, manager.NewExecFirewall()),
