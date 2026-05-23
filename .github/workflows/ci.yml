@@ -42,8 +42,7 @@ jobs:
           fetch-depth: 0
       - uses: astral-sh/setup-uv@v7
         with:
-          enable-cache: true
-          cache-suffix: ${{ github.job }}
+          enable-cache: false
       - name: Install multicz
         run: uv tool install multicz
       - name: Validate multicz configuration
@@ -133,7 +132,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - uses: golangci/golangci-lint-action@v8
+      - uses: golangci/golangci-lint-action@v9
         with:
           version: latest
 
@@ -325,8 +324,7 @@ jobs:
           cache: true
       - uses: astral-sh/setup-uv@v7
         with:
-          enable-cache: true
-          cache-suffix: ${{ github.job }}
+          enable-cache: false
       - name: Install multicz
         run: uv tool install multicz
       - name: Configure git author
@@ -437,8 +435,7 @@ jobs:
           cache-dependency-path: www/package-lock.json
       - uses: astral-sh/setup-uv@v7
         with:
-          enable-cache: true
-          cache-suffix: ${{ github.job }}
+          enable-cache: false
       - name: Install multicz
         run: uv tool install multicz
       - name: Build release binaries
@@ -511,8 +508,7 @@ jobs:
           enablement: true
       - uses: astral-sh/setup-uv@v7
         with:
-          enable-cache: true
-          cache-suffix: ${{ github.job }}
+          enable-cache: false
       - name: Build site
         run: uv tool run zensical build --clean
       - uses: actions/upload-pages-artifact@v5
