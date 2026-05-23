@@ -53,6 +53,7 @@ run as root.
 | Disk             | a backing image, optionally dm-crypt (LUKS) encrypted |
 | Security group   | an allow-list iptables chain |
 | WAF policy       | an iptables chain attached inbound to the target |
+| Load balancer    | an IPVS virtual service on a VIP, real servers from backends |
 | Compute          | a network namespace running an OCI image |
 
 ## Encrypted disks
