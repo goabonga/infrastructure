@@ -49,6 +49,7 @@ run as root.
 | Subnet           | the gateway address on the VPC bridge |
 | Internet gateway | IPv4 forwarding + a MASQUERADE rule for the VPC CIDR |
 | Peering          | a veth pair joining the two VPC bridges |
+| DNS zone/record  | a per-VPC dnsmasq serving the zones' A/AAAA records |
 | Disk             | a backing image, optionally dm-crypt (LUKS) encrypted |
 | Security group   | an allow-list iptables chain |
 | WAF policy       | an iptables chain attached inbound to the target |
