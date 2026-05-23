@@ -190,6 +190,46 @@ func TestScheduleNeverSeenNodeNotReady(t *testing.T) {
 	}
 }
 
+func TestScheduleEvictsAndReschedules(t *testing.T) {
+	t.Parallel()
+
+	env := newSchedEnv(t)
+	env.putNodeSeen(t, "node-a", 4, 8192, 10, nil, time.Now().Add(-time.Hour)) // stale
+	env.putNode(t, "node-b", 4, 8192, 10, nil)                                 // fresh
+	env.putCompute(t, "i-1", 1, 256, "", "node-a")                             // placed on the stale node
+
+	if err := env.ctrl.Reconcile(context.Background()); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	c, _ := env.computes.Get("i-1")
+	if c.Status.NodeName != "node-b" {
+		t.Fatalf("compute should be rescheduled to node-b, got %q", c.Status.NodeName)
+	}
+	a, _ := env.nodes.Get("node-a")
+	if a.Status.Allocated.Pods != 0 {
+		t.Fatalf("stale node should hold no allocation: %+v", a.Status.Allocated)
+	}
+	b, _ := env.nodes.Get("node-b")
+	if b.Status.Allocated.Pods != 1 {
+		t.Fatalf("live node should hold the rescheduled pod: %+v", b.Status.Allocated)
+	}
+}
+
+func TestScheduleEvictsFromDeletedNode(t *testing.T) {
+	t.Parallel()
+
+	env := newSchedEnv(t)
+	env.putCompute(t, "i-1", 1, 256, "", "node-gone") // node no longer exists
+
+	if err := env.ctrl.Reconcile(context.Background()); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	c, _ := env.computes.Get("i-1")
+	if c.Status.NodeName != "" {
+		t.Fatalf("placement on a deleted node should be cleared, got %q", c.Status.NodeName)
+	}
+}
+
 func TestScheduleMissingPoolLeavesUnscheduled(t *testing.T) {
 	t.Parallel()
 

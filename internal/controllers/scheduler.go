@@ -89,6 +89,23 @@ func (c *SchedulerController) Reconcile(ctx context.Context) error {
 		alloc[nodes[i].Metadata.UID] = &nodeAlloc{}
 		ready[nodes[i].Metadata.UID] = c.nodeReady(&nodes[i], now)
 	}
+
+	var errs []error
+	// Evict compute placed on a node that is no longer ready (stale or deleted),
+	// clearing its placement so it can be rescheduled onto a live node.
+	for i := range computes {
+		cp := &computes[i]
+		if cp.Metadata.IsDeleting() || cp.Status.NodeName == "" || ready[cp.Status.NodeName] {
+			continue
+		}
+		if err := c.evict(cp.Metadata.UID); err != nil {
+			errs = append(errs, fmt.Errorf("evict %s: %w", cp.Metadata.UID, err))
+			continue
+		}
+		c.logger.InfoContext(ctx, "evicted compute", "compute", cp.Metadata.UID, "node", cp.Status.NodeName)
+		cp.Status.NodeName = ""
+	}
+
 	for i := range computes {
 		cp := &computes[i]
 		if cp.Metadata.IsDeleting() {
@@ -101,7 +118,6 @@ func (c *SchedulerController) Reconcile(ctx context.Context) error {
 		}
 	}
 
-	var errs []error
 	for i := range computes {
 		cp := &computes[i]
 		if cp.Metadata.IsDeleting() || cp.Status.NodeName != "" {
@@ -146,6 +162,20 @@ func (c *SchedulerController) assign(uid, node string) error {
 		return nil
 	}
 	cur.Status.NodeName = node
+	return c.computes.Put(cur)
+}
+
+// evict clears a compute's placement on the latest copy so it can be
+// rescheduled, preserving the fields the agent owns.
+func (c *SchedulerController) evict(uid string) error {
+	cur, err := c.computes.Get(uid)
+	if err != nil {
+		return err
+	}
+	if cur.Status.NodeName == "" {
+		return nil
+	}
+	cur.Status.NodeName = ""
 	return c.computes.Put(cur)
 }
 
