@@ -18,36 +18,66 @@ On the libvirt host:
 
 - An SSH key at `~/.ssh/id_ed25519.pub` (or change `ssh_public_key`).
 
-## Build the packages
+## Build the artifacts
 
-From the repository root, build the `.deb` files into `dist/`:
+From the repository root:
 
 ```bash
-make deb VERSION=0.1.0
+make deb VERSION=0.1.0   # .deb packages          -> dist/
+make build-www           # dashboard (SPA embedded) -> build/infra-www
+make build-provider      # Terraform provider       -> build/terraform-provider-infra
 ```
 
 Keep `version` in `group_vars/all.yml` in sync with the `VERSION` you build.
 
-## Provision and deploy
+## Deploy the full stack
+
+Run as your normal user (not under sudo); `-K` provides the local become
+password, and the playbook escalates on the VMs over SSH.
 
 ```bash
 cd deploy/ansible
 
 # 1. Create the VMs (control + two agents) on the libvirt default network.
-ansible-playbook create-vms.yml
+ansible-playbook --ask-become-pass create-vms.yml
 
-# 2. Install the packages and start the services.
-ansible-playbook site.yml
+# 2. Deploy etcd, the control plane, the IdP, the dashboard, monitoring, agents.
+ansible-playbook --ask-become-pass site.yml
 ```
 
-`site.yml` installs the control-plane packages on the `control` host
-(`infra-api`, `infra-controller-manager`, `infra-idp`, `infra-exporter`) and the
-agent packages on the `agents` hosts, then waits for the API health check.
+`site.yml` first generates local credentials under `.credentials/` (gitignored):
+the KMS key, the IdP ES256 keypair and a Terraform client secret. It then
+deploys, on the control host:
+
+| Component | Address | Notes |
+| --- | --- | --- |
+| etcd | `:2379` | shared state backend; every component uses it |
+| infra-api | `:8080` | verifies IdP JWTs, secret/disk encryption enabled |
+| infra-controller-manager | - | scheduler + reconcilers (leader-elected) |
+| infra-exporter | `:9100` | Prometheus metrics |
+| infra-idp | `:8081` | ES256 JWT issuer (client-credentials grant) |
+| infra-www | `:8088` | dashboard (embedded SPA + API reverse proxy) |
+| Prometheus | `:9090` | scrapes the exporter (native, no Docker) |
+| Grafana | `:3000` | admin / infra; infra dashboard provisioned |
+
+On each agent host it deploys `infra-agent` (sharing the etcd store, with the
+KMS key and `GOA_NODE_ID`) and registers the host as a schedulable node.
+
+## Provision infra with Terraform
+
+With the stack up, run `terraform apply` from your terminal to build a topology
+against it. See [terraform/README.md](terraform/README.md).
+
+## Access
+
+- Dashboard: `http://192.168.122.10:8088`
+- Grafana:   `http://192.168.122.10:3000` (admin / infra)
+- API:       `http://192.168.122.10:8080` (needs a Bearer JWT from the IdP)
 
 ## Tear down
 
 ```bash
-ansible-playbook destroy-vms.yml
+ansible-playbook --ask-become-pass destroy-vms.yml
 ```
 
 ## Topology
