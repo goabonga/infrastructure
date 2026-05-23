@@ -27,3 +27,19 @@ func TestOpenFileStore(t *testing.T) {
 		t.Fatalf("get = %q, %v", got, err)
 	}
 }
+
+func TestOpenEtcdScheme(t *testing.T) {
+	t.Parallel()
+
+	// An "etcd://" DSN selects the etcd backend. The client dials lazily, so
+	// Open succeeds without a reachable server.
+	store, err := state.Open("", "etcd://127.0.0.1:2379,127.0.0.1:12379")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	if _, ok := store.(*state.EtcdStore); !ok {
+		t.Fatalf("Open returned %T, want *state.EtcdStore", store)
+	}
+}
