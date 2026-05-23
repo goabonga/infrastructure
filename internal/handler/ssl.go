@@ -33,6 +33,13 @@ func (h *SSLHandler) Register(mux *http.ServeMux, base string) {
 	mux.HandleFunc("PUT "+p+"/{uid}", h.put)
 	mux.HandleFunc("DELETE "+p+"/{uid}", h.delete)
 	mux.HandleFunc("POST "+p+"/{uid}/issue", h.issue)
+
+	c := base + "/" + resource.KindSSLCert
+	mux.HandleFunc("GET "+c, h.listCerts)
+	mux.HandleFunc("GET "+c+"/{uid}", h.getCert)
+	mux.HandleFunc("GET "+c+"/{uid}/reveal", h.revealCert)
+	mux.HandleFunc("PUT "+c+"/{uid}", h.putCert)
+	mux.HandleFunc("DELETE "+c+"/{uid}", h.deleteCert)
 }
 
 func (h *SSLHandler) list(w http.ResponseWriter, _ *http.Request) {
@@ -115,4 +122,72 @@ func (h *SSLHandler) issue(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeError(w, http.StatusInternalServerError, err.Error())
 	}
+}
+
+func (h *SSLHandler) listCerts(w http.ResponseWriter, _ *http.Request) {
+	items, err := h.svc.ListCert()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, resource.List[resource.SSLCertSpec, resource.SSLCertStatus]{
+		APIVersion: resource.APIVersion,
+		Kind:       resource.KindSSLCert,
+		Items:      items,
+	})
+}
+
+func (h *SSLHandler) getCert(w http.ResponseWriter, r *http.Request) {
+	cert, err := h.svc.GetCert(r.PathValue("uid"))
+	switch {
+	case err == nil:
+		writeJSON(w, http.StatusOK, cert)
+	case errors.Is(err, state.ErrNotFound):
+		writeError(w, http.StatusNotFound, "not found")
+	default:
+		writeError(w, http.StatusInternalServerError, err.Error())
+	}
+}
+
+func (h *SSLHandler) revealCert(w http.ResponseWriter, r *http.Request) {
+	certPEM, keyPEM, err := h.svc.RevealCert(r.PathValue("uid"))
+	switch {
+	case err == nil:
+		writeJSON(w, http.StatusOK, map[string]string{"cert": string(certPEM), "key": string(keyPEM)})
+	case errors.Is(err, state.ErrNotFound):
+		writeError(w, http.StatusNotFound, "not found")
+	default:
+		writeError(w, http.StatusInternalServerError, err.Error())
+	}
+}
+
+func (h *SSLHandler) putCert(w http.ResponseWriter, r *http.Request) {
+	var in resource.SSLCert
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&in); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid body: "+err.Error())
+		return
+	}
+	if err := in.Spec.Validate(); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	out, err := h.svc.CreateCert(r.PathValue("uid"), in.Metadata.Name, in.Spec)
+	switch {
+	case err == nil:
+		writeJSON(w, http.StatusOK, out)
+	case errors.Is(err, state.ErrNotFound):
+		writeError(w, http.StatusNotFound, "ca not found")
+	default:
+		writeError(w, http.StatusInternalServerError, err.Error())
+	}
+}
+
+func (h *SSLHandler) deleteCert(w http.ResponseWriter, r *http.Request) {
+	if err := h.svc.DeleteCert(r.PathValue("uid")); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

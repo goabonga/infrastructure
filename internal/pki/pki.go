@@ -15,6 +15,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"math/big"
+	"net"
 	"time"
 )
 
@@ -27,9 +28,10 @@ type CASpec struct {
 
 // CertSpec describes a leaf certificate to issue.
 type CertSpec struct {
-	CommonName string
-	DNSNames   []string
-	ValidFor   time.Duration
+	CommonName  string
+	DNSNames    []string
+	IPAddresses []net.IP
+	ValidFor    time.Duration
 }
 
 // CA is a certificate authority able to issue leaf certificates.
@@ -118,6 +120,7 @@ func (ca *CA) Issue(spec CertSpec) (certPEM, keyPEM []byte, err error) {
 		SerialNumber: serial,
 		Subject:      pkix.Name{CommonName: spec.CommonName},
 		DNSNames:     spec.DNSNames,
+		IPAddresses:  spec.IPAddresses,
 		NotBefore:    now,
 		NotAfter:     now.Add(spec.ValidFor),
 		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,

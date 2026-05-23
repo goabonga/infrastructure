@@ -90,7 +90,8 @@ func (s *Server) routes() {
 		handler.NewSecretHandler(secret.NewService(secrets, secretVersions, s.kek)).Register(s.mux, APIBase)
 
 		cas := registry.New[resource.SSLCASpec, resource.SSLCAStatus](s.store, resource.KindSSLCA)
-		handler.NewSSLHandler(ssl.NewService(cas, s.kek)).Register(s.mux, APIBase)
+		certs := registry.New[resource.SSLCertSpec, resource.SSLCertStatus](s.store, resource.KindSSLCert)
+		handler.NewSSLHandler(ssl.NewService(cas, certs, s.kek)).Register(s.mux, APIBase)
 	}
 
 	s.mux.HandleFunc("GET "+healthPath, func(w http.ResponseWriter, _ *http.Request) {

@@ -26,7 +26,8 @@ func newService(t *testing.T) (*ssl.Service, state.Store) {
 	}
 	store := state.NewFileStore(t.TempDir())
 	reg := registry.New[resource.SSLCASpec, resource.SSLCAStatus](store, resource.KindSSLCA)
-	return ssl.NewService(reg, kek), store
+	certs := registry.New[resource.SSLCertSpec, resource.SSLCertStatus](store, resource.KindSSLCert)
+	return ssl.NewService(reg, certs, kek), store
 }
 
 func TestCreateCARedactsKeyButKeepsCert(t *testing.T) {
@@ -85,6 +86,71 @@ func TestIssueCertVerifiesAgainstCA(t *testing.T) {
 	}
 	if _, err := leaf.Verify(x509.VerifyOptions{Roots: roots, DNSName: "example.com"}); err != nil {
 		t.Fatalf("leaf should verify against the CA: %v", err)
+	}
+}
+
+func TestCreateCertPersistsAndReveals(t *testing.T) {
+	t.Parallel()
+
+	svc, store := newService(t)
+	ca, err := svc.CreateCA("ca-1", "root", resource.SSLCASpec{CommonName: "infra root"})
+	if err != nil {
+		t.Fatalf("create ca: %v", err)
+	}
+
+	cert, err := svc.CreateCert("cert-1", "web", resource.SSLCertSpec{
+		CAID:        "ca-1",
+		CommonName:  "web.example.com",
+		DNSNames:    []string{"web.example.com"},
+		IPAddresses: []string{"10.0.1.10"},
+		ValidDays:   30,
+	})
+	if err != nil {
+		t.Fatalf("create cert: %v", err)
+	}
+	if len(cert.Status.CertPEM) == 0 || cert.Status.EncryptedKey != nil {
+		t.Fatalf("cert response should expose the cert but redact the key: %+v", cert.Status)
+	}
+
+	// The leaf private key must not be readable in clear on disk.
+	raw, err := store.Get("ssl_cert/cert-1")
+	if err != nil {
+		t.Fatalf("raw get: %v", err)
+	}
+	if bytes.Contains(raw, []byte("EC PRIVATE KEY")) {
+		t.Fatal("leaf private key stored in clear")
+	}
+
+	certPEM, keyPEM, err := svc.RevealCert("cert-1")
+	if err != nil {
+		t.Fatalf("reveal: %v", err)
+	}
+	if block, _ := pem.Decode(keyPEM); block == nil {
+		t.Fatal("invalid revealed key PEM")
+	}
+
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(ca.Status.CertPEM) {
+		t.Fatal("add CA to pool")
+	}
+	block, _ := pem.Decode(certPEM)
+	leaf, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatalf("parse leaf: %v", err)
+	}
+	if _, err := leaf.Verify(x509.VerifyOptions{Roots: roots, DNSName: "web.example.com"}); err != nil {
+		t.Fatalf("persisted leaf should verify against the CA: %v", err)
+	}
+
+	certs, err := svc.ListCert()
+	if err != nil || len(certs) != 1 || certs[0].Status.EncryptedKey != nil {
+		t.Fatalf("list certs = %d %v (key must be redacted)", len(certs), err)
+	}
+	if err := svc.DeleteCert("cert-1"); err != nil {
+		t.Fatalf("delete cert: %v", err)
+	}
+	if _, err := svc.GetCert("cert-1"); !errors.Is(err, state.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
 }
 

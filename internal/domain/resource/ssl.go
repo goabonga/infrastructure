@@ -37,3 +37,41 @@ type SSLCAStatus struct {
 
 // SSLCA is a certificate authority resource.
 type SSLCA = Resource[SSLCASpec, SSLCAStatus]
+
+// KindSSLCert is the resource kind for SSL leaf certificates.
+const KindSSLCert = "ssl_cert"
+
+// SSLCertSpec is the desired state of a leaf certificate signed by a CA.
+type SSLCertSpec struct {
+	CAID        string   `json:"caId"`
+	CommonName  string   `json:"commonName"`
+	DNSNames    []string `json:"dnsNames,omitempty"`
+	IPAddresses []string `json:"ipAddresses,omitempty"`
+	// ValidDays is the certificate lifetime; zero means the server default.
+	ValidDays int `json:"validDays,omitempty"`
+}
+
+// Validate reports whether the spec is well-formed for a write.
+func (s SSLCertSpec) Validate() error {
+	if s.CAID == "" {
+		return fmt.Errorf("ssl_cert: caId is required")
+	}
+	if s.CommonName == "" {
+		return fmt.Errorf("ssl_cert: commonName is required")
+	}
+	if s.ValidDays < 0 {
+		return fmt.Errorf("ssl_cert: validDays must not be negative")
+	}
+	return nil
+}
+
+// SSLCertStatus is the observed state of a certificate. CertPEM is public;
+// EncryptedKey is the envelope-encrypted private key, never returned in clear.
+type SSLCertStatus struct {
+	StatusBase
+	CertPEM      []byte `json:"certPem,omitempty"`
+	EncryptedKey []byte `json:"encryptedKey,omitempty"`
+}
+
+// SSLCert is a leaf-certificate resource.
+type SSLCert = Resource[SSLCertSpec, SSLCertStatus]

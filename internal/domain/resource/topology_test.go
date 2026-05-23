@@ -33,6 +33,7 @@ func TestTopologySpecsSatisfyValidator(t *testing.T) {
 		_ resource.Validator = resource.NodeSpec{}
 		_ resource.Validator = resource.NodePoolSpec{}
 		_ resource.Validator = resource.SecretVersionSpec{}
+		_ resource.Validator = resource.SSLCertSpec{}
 	)
 }
 
@@ -88,6 +89,9 @@ func TestTopologyValidate(t *testing.T) {
 		{"secret version ok", resource.SecretVersionSpec{SecretID: "sec-1", Data: "x"}, false},
 		{"secret version no secret", resource.SecretVersionSpec{Data: "x"}, true},
 		{"secret version no data", resource.SecretVersionSpec{SecretID: "sec-1"}, true},
+		{"ssl cert ok", resource.SSLCertSpec{CAID: "ca-1", CommonName: "web.example.com"}, false},
+		{"ssl cert no ca", resource.SSLCertSpec{CommonName: "web.example.com"}, true},
+		{"ssl cert no cn", resource.SSLCertSpec{CAID: "ca-1"}, true},
 	}
 	for _, tc := range tests {
 		tc := tc

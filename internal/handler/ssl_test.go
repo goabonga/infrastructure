@@ -23,9 +23,11 @@ func newSSLMux(t *testing.T) *http.ServeMux {
 	if err != nil {
 		t.Fatalf("kek: %v", err)
 	}
-	reg := registry.New[resource.SSLCASpec, resource.SSLCAStatus](state.NewFileStore(t.TempDir()), resource.KindSSLCA)
+	store := state.NewFileStore(t.TempDir())
+	reg := registry.New[resource.SSLCASpec, resource.SSLCAStatus](store, resource.KindSSLCA)
+	certs := registry.New[resource.SSLCertSpec, resource.SSLCertStatus](store, resource.KindSSLCert)
 	mux := http.NewServeMux()
-	handler.NewSSLHandler(ssl.NewService(reg, kek)).Register(mux, "/api/v1")
+	handler.NewSSLHandler(ssl.NewService(reg, certs, kek)).Register(mux, "/api/v1")
 	return mux
 }
 
