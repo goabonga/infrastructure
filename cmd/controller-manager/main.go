@@ -45,10 +45,14 @@ func run() error {
 		return err
 	}
 	vpcs := registry.New[resource.VPCSpec, resource.VPCStatus](store, resource.KindVPC)
+	computes := registry.New[resource.ComputeSpec, resource.ComputeStatus](store, resource.KindCompute)
+	nodes := registry.New[resource.NodeSpec, resource.NodeStatus](store, resource.KindNode)
+	nodePools := registry.New[resource.NodePoolSpec, resource.NodePoolStatus](store, resource.KindNodePool)
 
 	lease := controllers.NewLease(store, "leases/controller-manager", holderID(), *ttl, nil)
 	mgr := controllers.NewManager(lease, *interval, logger)
 	mgr.Add(controllers.NewVPCSummaryController(vpcs, logger))
+	mgr.Add(controllers.NewSchedulerController(computes, nodes, nodePools, logger))
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
