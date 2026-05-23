@@ -33,8 +33,10 @@ Keep `version` in `group_vars/all.yml` in sync with the `VERSION` you build.
 
 ## Deploy the full stack
 
-Run as your normal user (not under sudo); `-K` provides the local become
-password, and the playbook escalates on the VMs over SSH.
+Run these as your normal user, not under `sudo`: the `ssh_public_key` lookup
+reads `$HOME/.ssh/id_ed25519.pub`, and under `sudo` `$HOME` becomes `/root`.
+`-K` (`--ask-become-pass`) prompts for the local sudo password that `become`
+needs to drive `qemu:///system` and write into `images_dir`.
 
 ```bash
 cd deploy/ansible
