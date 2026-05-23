@@ -25,6 +25,7 @@ nav = [
     ] },
     { "Operations" = [
         { "Deployment" = "operations/deploy.md" },
+        { "Secrets and PKI" = "operations/secrets.md" },
     ] },
     { "Terraform provider" = [
         { "Overview" = "provider/index.md" },
