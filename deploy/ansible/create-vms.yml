@@ -24,6 +24,7 @@
     - name: Ensure the base cloud image exists
       ansible.builtin.stat:
         path: "{{ base_image }}"
+        get_checksum: false
       register: base_image_stat
 
     - name: Fail when the base image is missing
