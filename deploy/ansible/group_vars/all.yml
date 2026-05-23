@@ -30,3 +30,49 @@ control_packages: ["infra", "infra-api", "infra-controller-manager", "infra-idp"
 control_services: ["infra-api", "infra-controller-manager", "infra-idp", "infra-exporter"]
 agent_packages: ["infra", "infra-container-init", "infra-agent"]
 agent_services: ["infra-agent"]
+
+# --- Full-stack deployment (site.yml) -------------------------------------
+# The control host that runs etcd, the control plane, the IdP, the dashboard
+# and the monitoring stack. Its address is taken from the inventory.
+control_host: "infra-control"
+control_ip: "{{ hostvars[control_host].ansible_host }}"
+
+# Shared configuration directory on every managed host.
+infra_conf_dir: "/etc/infra"
+
+# etcd: the shared, HA state backend. Every component points at it through
+# GOA_STATE_DSN, so the API, controllers, exporter and agents see one store.
+etcd_version: "v3.6.11"
+etcd_client_port: 2379
+etcd_peer_port: 2380
+etcd_data_dir: "/var/lib/etcd"
+state_dsn: "etcd://{{ control_ip }}:{{ etcd_client_port }}"
+
+# Credentials are generated once on the controller and reused across runs.
+# Keep this directory out of git (see .gitignore).
+cred_dir: "{{ playbook_dir }}/.credentials"
+kms_key_file: "{{ cred_dir }}/kms.key"
+idp_key_file: "{{ cred_dir }}/idp-es256.key"
+jwt_pub_file: "{{ cred_dir }}/jwt-es256.pub"
+idp_client_secret_file: "{{ cred_dir }}/terraform-client.secret"
+
+# Identity provider (JWT, ES256). The API verifies the IdP's tokens.
+idp_addr: ":8081"
+idp_issuer: "http://{{ control_ip }}:8081"
+idp_client_id: "terraform"
+
+# Listen addresses / ports.
+api_addr: ":8080"
+www_addr: ":8088"
+exporter_addr: ":9100"
+
+# Native monitoring stack (no Docker).
+prometheus_version: "2.55.1"
+prometheus_port: 9090
+prometheus_data_dir: "/var/lib/prometheus"
+grafana_port: 3000
+grafana_admin_user: "admin"
+grafana_admin_password: "infra"
+
+# The dashboard binary, built beforehand with `make build-www`.
+www_binary: "{{ playbook_dir }}/../../build/infra-www"
