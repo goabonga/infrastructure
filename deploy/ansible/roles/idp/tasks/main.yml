@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Chris <goabonga@pm.me>
+---
+# infra-idp is already installed as part of control_packages; this configures it.
+- name: Ensure the infra-idp drop-in directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/system/infra-idp.service.d
+    state: directory
+    mode: "0755"
+
+- name: Deploy the IdP signing key
+  ansible.builtin.copy:
+    src: "{{ idp_key_file }}"
+    dest: "{{ infra_conf_dir }}/idp-es256.key"
+    owner: root
+    group: root
+    mode: "0600"
+  notify: Restart infra-idp
+
+- name: Write the IdP environment file
+  ansible.builtin.template:
+    src: idp.env.j2
+    dest: "{{ infra_conf_dir }}/idp.env"
+    owner: root
+    group: root
+    mode: "0640"
+  notify: Restart infra-idp
+
+- name: Install the infra-idp systemd drop-in
+  ansible.builtin.template:
+    src: infra-idp.override.conf.j2
+    dest: /etc/systemd/system/infra-idp.service.d/override.conf
+    mode: "0644"
+  notify: Restart infra-idp
+
+- name: Enable and start infra-idp
+  ansible.builtin.systemd_service:
+    name: infra-idp
+    enabled: true
+    state: started
+    daemon_reload: true
