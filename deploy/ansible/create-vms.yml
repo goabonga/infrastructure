@@ -13,7 +13,7 @@
   become: true
   tasks:
     - name: Ensure required tools are installed
-      ansible.builtin.command: "command -v {{ item }}"
+      ansible.builtin.shell: "command -v {{ item }}"
       changed_when: false
       loop:
         - qemu-img
