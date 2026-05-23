@@ -66,6 +66,8 @@ func run() error {
 	wafRules := registry.New[resource.WAFRuleSpec, resource.WAFRuleStatus](store, resource.KindWAFRule)
 	dnsZones := registry.New[resource.DNSZoneSpec, resource.DNSZoneStatus](store, resource.KindDNSZone)
 	dnsRecords := registry.New[resource.DNSRecordSpec, resource.DNSRecordStatus](store, resource.KindDNSRecord)
+	lbs := registry.New[resource.LoadBalancerSpec, resource.LoadBalancerStatus](store, resource.KindLoadBalancer)
+	lbBackends := registry.New[resource.LBBackendSpec, resource.LBBackendStatus](store, resource.KindLBBackend)
 	agent := manager.NewAgent(*interval, logger,
 		manager.NewVPCReconciler(vpcs, net),
 		manager.NewSubnetReconciler(subnets, vpcs, net),
@@ -77,6 +79,7 @@ func run() error {
 		manager.NewACLReconciler(acls, manager.NewExecFirewall()),
 		manager.NewComputeReconciler(computes, subnets, vpcs, disks, sgs, manager.NewExecComputeBackend(*stateDir)),
 		manager.NewWAFReconciler(wafPolicies, wafRules, computes, subnets, igws, vpcs, manager.NewExecWAF()),
+		manager.NewLoadBalancerReconciler(lbs, lbBackends, computes, vpcs, manager.NewExecLB()),
 	)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
