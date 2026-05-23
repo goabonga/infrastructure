@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 
 import { listResources } from "../api/generic";
 
-const TILES = ["vpc", "subnet", "security_group", "disk", "compute"] as const;
+const TILES = ["vpc", "subnet", "security_group", "disk", "compute", "load_balancer", "node", "node_pool"] as const;
 
 export default function Overview() {
   const [counts, setCounts] = useState<Record<string, number>>({});

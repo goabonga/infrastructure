@@ -4,6 +4,7 @@
 import { type FormEvent, useEffect, useState } from "react";
 
 import { type GenericResource, KINDS, createResource, deleteResource, listResources } from "../api/generic";
+import { Fields, PhaseBadge, STATUS_SKIP } from "../components/Fields";
 
 export default function Resources() {
   const [kind, setKind] = useState<string>("vpc");
@@ -98,6 +99,7 @@ export default function Resources() {
             <th>UID</th>
             <th>Phase</th>
             <th>Spec</th>
+            <th>Status</th>
             <th />
           </tr>
         </thead>
@@ -105,9 +107,14 @@ export default function Resources() {
           {items.map((r) => (
             <tr key={r.metadata.uid}>
               <td>{r.metadata.uid}</td>
-              <td>{r.status.phase ?? "-"}</td>
               <td>
-                <code>{JSON.stringify(r.spec)}</code>
+                <PhaseBadge phase={r.status.phase} />
+              </td>
+              <td>
+                <Fields data={r.spec} />
+              </td>
+              <td>
+                <Fields data={r.status} skip={STATUS_SKIP} />
               </td>
               <td>
                 <button onClick={() => onDelete(r.metadata.uid)}>Delete</button>
@@ -116,7 +123,7 @@ export default function Resources() {
           ))}
           {items.length === 0 && (
             <tr>
-              <td colSpan={4}>No {kind} resources.</td>
+              <td colSpan={5}>No {kind} resources.</td>
             </tr>
           )}
         </tbody>
