@@ -51,6 +51,7 @@ run as root.
 | Peering          | a veth pair joining the two VPC bridges |
 | Disk             | a backing image, optionally dm-crypt (LUKS) encrypted |
 | Security group   | an allow-list iptables chain |
+| WAF policy       | an iptables chain attached inbound to the target |
 | Compute          | a network namespace running an OCI image |
 
 ## Encrypted disks
