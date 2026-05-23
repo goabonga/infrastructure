@@ -32,6 +32,7 @@ type computeModel struct {
 	Name            types.String  `tfsdk:"name"`
 	SubnetID        types.String  `tfsdk:"subnet_id"`
 	SecurityGroupID types.String  `tfsdk:"security_group_id"`
+	NodePoolID      types.String  `tfsdk:"node_pool_id"`
 	Hostname        types.String  `tfsdk:"hostname"`
 	CPU             types.Float64 `tfsdk:"cpu"`
 	MemoryMB        types.Int64   `tfsdk:"memory_mb"`
@@ -58,6 +59,7 @@ func NewComputeResource() resource.Resource {
 				"name":              schema.StringAttribute{Optional: true, Computed: true, MarkdownDescription: "Display name."},
 				"subnet_id":         schema.StringAttribute{Required: true, MarkdownDescription: "Subnet to attach to."},
 				"security_group_id": schema.StringAttribute{Optional: true, Computed: true, MarkdownDescription: "Security group to apply."},
+				"node_pool_id":      schema.StringAttribute{Optional: true, Computed: true, MarkdownDescription: "Node pool to schedule onto; empty schedules anywhere."},
 				"hostname":          schema.StringAttribute{Optional: true, Computed: true, MarkdownDescription: "Instance hostname."},
 				"cpu":               schema.Float64Attribute{Optional: true, Computed: true, MarkdownDescription: "CPU cores."},
 				"memory_mb":         schema.Int64Attribute{Optional: true, Computed: true, MarkdownDescription: "Memory in MB."},
@@ -118,6 +120,7 @@ func computeToSpec(ctx context.Context, m computeModel) (infra.ComputeSpec, diag
 		Name:            m.Name.ValueString(),
 		SubnetID:        m.SubnetID.ValueString(),
 		SecurityGroupID: m.SecurityGroupID.ValueString(),
+		NodePoolID:      m.NodePoolID.ValueString(),
 		Hostname:        m.Hostname.ValueString(),
 		CPU:             m.CPU.ValueFloat64(),
 		MemoryMB:        int(m.MemoryMB.ValueInt64()),
@@ -155,6 +158,7 @@ func computeToModel(ctx context.Context, r *infra.Compute) (computeModel, diag.D
 		Name:            types.StringValue(r.Spec.Name),
 		SubnetID:        types.StringValue(r.Spec.SubnetID),
 		SecurityGroupID: types.StringValue(r.Spec.SecurityGroupID),
+		NodePoolID:      types.StringValue(r.Spec.NodePoolID),
 		Hostname:        types.StringValue(r.Spec.Hostname),
 		CPU:             types.Float64Value(r.Spec.CPU),
 		MemoryMB:        types.Int64Value(int64(r.Spec.MemoryMB)),

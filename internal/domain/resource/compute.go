@@ -22,19 +22,21 @@ type ComputeDiskRef struct {
 // ComputeSpec is the desired state of a compute instance: an OCI image run in a
 // network namespace with cgroup limits, attached to a subnet and disks.
 type ComputeSpec struct {
-	Name            string            `json:"name,omitempty"`
-	SubnetID        string            `json:"subnetId"`
-	SecurityGroupID string            `json:"securityGroupId,omitempty"`
-	Hostname        string            `json:"hostname,omitempty"`
-	CPU             float64           `json:"cpu,omitempty"`
-	MemoryMB        int               `json:"memoryMb,omitempty"`
-	PidsMax         int               `json:"pidsMax,omitempty"`
-	Image           string            `json:"image"`
-	Command         string            `json:"command,omitempty"`
-	Env             map[string]string `json:"env,omitempty"`
-	Ports           []string          `json:"ports,omitempty"`
-	Disks           []ComputeDiskRef  `json:"disks,omitempty"`
-	Privileged      bool              `json:"privileged,omitempty"`
+	Name            string `json:"name,omitempty"`
+	SubnetID        string `json:"subnetId"`
+	SecurityGroupID string `json:"securityGroupId,omitempty"`
+	// NodePoolID constrains placement to a node pool; empty schedules anywhere.
+	NodePoolID string            `json:"nodePoolId,omitempty"`
+	Hostname   string            `json:"hostname,omitempty"`
+	CPU        float64           `json:"cpu,omitempty"`
+	MemoryMB   int               `json:"memoryMb,omitempty"`
+	PidsMax    int               `json:"pidsMax,omitempty"`
+	Image      string            `json:"image"`
+	Command    string            `json:"command,omitempty"`
+	Env        map[string]string `json:"env,omitempty"`
+	Ports      []string          `json:"ports,omitempty"`
+	Disks      []ComputeDiskRef  `json:"disks,omitempty"`
+	Privileged bool              `json:"privileged,omitempty"`
 }
 
 // Validate reports whether the spec is well-formed.
