@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/goabonga/infrastructure/internal/domain/resource"
 	"github.com/goabonga/infrastructure/internal/registry"
@@ -25,24 +26,40 @@ type nodeAlloc struct {
 // allocation and node-pool readiness. It is a cluster-level controller and runs
 // under leader election.
 type SchedulerController struct {
-	computes *registry.Registry[resource.ComputeSpec, resource.ComputeStatus]
-	nodes    *registry.Registry[resource.NodeSpec, resource.NodeStatus]
-	pools    *registry.Registry[resource.NodePoolSpec, resource.NodePoolStatus]
-	logger   *slog.Logger
+	computes    *registry.Registry[resource.ComputeSpec, resource.ComputeStatus]
+	nodes       *registry.Registry[resource.NodeSpec, resource.NodeStatus]
+	pools       *registry.Registry[resource.NodePoolSpec, resource.NodePoolStatus]
+	readyWindow time.Duration
+	now         func() time.Time
+	logger      *slog.Logger
 }
 
 // NewSchedulerController returns a scheduler reading from the compute, node and
-// node-pool stores.
+// node-pool stores. A node is schedulable only while its heartbeat is within
+// readyWindow.
 func NewSchedulerController(
 	computes *registry.Registry[resource.ComputeSpec, resource.ComputeStatus],
 	nodes *registry.Registry[resource.NodeSpec, resource.NodeStatus],
 	pools *registry.Registry[resource.NodePoolSpec, resource.NodePoolStatus],
+	readyWindow time.Duration,
 	logger *slog.Logger,
 ) *SchedulerController {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &SchedulerController{computes: computes, nodes: nodes, pools: pools, logger: logger}
+	return &SchedulerController{computes: computes, nodes: nodes, pools: pools, readyWindow: readyWindow, now: time.Now, logger: logger}
+}
+
+// nodeReady reports whether a node has heartbeated within the ready window.
+func (c *SchedulerController) nodeReady(n *resource.Node, now time.Time) bool {
+	if n.Status.LastSeen == "" {
+		return false
+	}
+	t, err := time.Parse(time.RFC3339, n.Status.LastSeen)
+	if err != nil {
+		return false
+	}
+	return now.Sub(t) <= c.readyWindow
 }
 
 // Name identifies the controller.
@@ -65,9 +82,12 @@ func (c *SchedulerController) Reconcile(ctx context.Context) error {
 		return fmt.Errorf("controllers: list node pools: %w", err)
 	}
 
+	now := c.now()
+	ready := make(map[string]bool, len(nodes))
 	alloc := make(map[string]*nodeAlloc, len(nodes))
 	for i := range nodes {
 		alloc[nodes[i].Metadata.UID] = &nodeAlloc{}
+		ready[nodes[i].Metadata.UID] = c.nodeReady(&nodes[i], now)
 	}
 	for i := range computes {
 		cp := &computes[i]
@@ -91,7 +111,7 @@ func (c *SchedulerController) Reconcile(ctx context.Context) error {
 		if !ok {
 			continue // references a missing pool; cannot place
 		}
-		node := pickNode(nodes, alloc, selector, cp.Spec.CPU, cp.Spec.MemoryMB)
+		node := pickNode(nodes, alloc, ready, selector, cp.Spec.CPU, cp.Spec.MemoryMB)
 		if node == "" {
 			continue // no node fits this pass; retry later
 		}
@@ -106,10 +126,10 @@ func (c *SchedulerController) Reconcile(ctx context.Context) error {
 		c.logger.InfoContext(ctx, "scheduled compute", "compute", cp.Metadata.UID, "node", node)
 	}
 
-	if err := c.writeNodeStatus(nodes, alloc); err != nil {
+	if err := c.writeNodeStatus(nodes, alloc, ready); err != nil {
 		errs = append(errs, err)
 	}
-	if err := c.writePoolStatus(pools, nodes); err != nil {
+	if err := c.writePoolStatus(pools, nodes, ready); err != nil {
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
@@ -144,19 +164,31 @@ func (c *SchedulerController) poolSelector(pools []resource.NodePool, poolID str
 	return nil, false
 }
 
-// writeNodeStatus records each node's recomputed allocation and marks it ready.
-func (c *SchedulerController) writeNodeStatus(nodes []resource.Node, alloc map[string]*nodeAlloc) error {
+// writeNodeStatus records each node's recomputed allocation and its readiness
+// derived from the heartbeat.
+func (c *SchedulerController) writeNodeStatus(nodes []resource.Node, alloc map[string]*nodeAlloc, ready map[string]bool) error {
 	var errs []error
 	for i := range nodes {
 		n := &nodes[i]
 		a := alloc[n.Metadata.UID]
 		want := resource.NodeAllocated{CPUs: a.cpus, MemoryMB: a.mem, Pods: a.pods}
-		if n.Status.Allocated == want && n.Status.Phase == resource.PhaseReady {
+		phase, reason, msg := resource.PhaseReady, "Ready", "node available for scheduling"
+		if !ready[n.Metadata.UID] {
+			phase = resource.PhasePending
+			if n.Status.LastSeen == "" {
+				reason, msg = "NeverSeen", "node has not heartbeated"
+			} else {
+				reason, msg = "Stale", "node heartbeat is stale"
+			}
+		}
+		if n.Status.Allocated == want && n.Status.Phase == phase {
 			continue
 		}
 		n.Status.Allocated = want
-		n.Status.SetPhase(resource.PhaseReady, "Registered", "node available for scheduling")
-		n.Status.MarkReconciled(n.Metadata.Generation)
+		n.Status.SetPhase(phase, reason, msg)
+		if phase == resource.PhaseReady {
+			n.Status.MarkReconciled(n.Metadata.Generation)
+		}
 		if err := c.nodes.Put(n); err != nil {
 			errs = append(errs, fmt.Errorf("controllers: save node %s: %w", n.Metadata.UID, err))
 		}
@@ -165,25 +197,25 @@ func (c *SchedulerController) writeNodeStatus(nodes []resource.Node, alloc map[s
 }
 
 // writePoolStatus records each pool's member and ready node counts.
-func (c *SchedulerController) writePoolStatus(pools []resource.NodePool, nodes []resource.Node) error {
+func (c *SchedulerController) writePoolStatus(pools []resource.NodePool, nodes []resource.Node, ready map[string]bool) error {
 	var errs []error
 	for i := range pools {
 		p := &pools[i]
-		total, ready := 0, 0
+		total, readyCount := 0, 0
 		for j := range nodes {
 			if !matchLabels(nodes[j].Spec.Labels, p.Spec.NodeSelector) {
 				continue
 			}
 			total++
-			if nodes[j].Status.Phase == resource.PhaseReady {
-				ready++
+			if ready[nodes[j].Metadata.UID] {
+				readyCount++
 			}
 		}
-		if p.Status.TotalNodes == total && p.Status.ReadyNodes == ready && p.Status.Phase == resource.PhaseReady {
+		if p.Status.TotalNodes == total && p.Status.ReadyNodes == readyCount && p.Status.Phase == resource.PhaseReady {
 			continue
 		}
 		p.Status.TotalNodes = total
-		p.Status.ReadyNodes = ready
+		p.Status.ReadyNodes = readyCount
 		p.Status.SetPhase(resource.PhaseReady, "Counted", "node pool reconciled")
 		p.Status.MarkReconciled(p.Metadata.Generation)
 		if err := c.pools.Put(p); err != nil {
@@ -193,14 +225,14 @@ func (c *SchedulerController) writePoolStatus(pools []resource.NodePool, nodes [
 	return errors.Join(errs...)
 }
 
-// pickNode returns the UID of the least-loaded node (by pod count) that matches
-// the selector and has room for the request, or "" when none fits.
-func pickNode(nodes []resource.Node, alloc map[string]*nodeAlloc, selector map[string]string, cpu float64, mem int) string {
+// pickNode returns the UID of the least-loaded ready node (by pod count) that
+// matches the selector and has room for the request, or "" when none fits.
+func pickNode(nodes []resource.Node, alloc map[string]*nodeAlloc, ready map[string]bool, selector map[string]string, cpu float64, mem int) string {
 	best := ""
 	bestPods := -1
 	for i := range nodes {
 		n := &nodes[i]
-		if !matchLabels(n.Spec.Labels, selector) {
+		if !ready[n.Metadata.UID] || !matchLabels(n.Spec.Labels, selector) {
 			continue
 		}
 		a := alloc[n.Metadata.UID]

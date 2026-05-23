@@ -6,6 +6,7 @@ package controllers_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/goabonga/infrastructure/internal/controllers"
 	"github.com/goabonga/infrastructure/internal/domain/resource"
@@ -28,16 +29,25 @@ func newSchedEnv(t *testing.T) *schedEnv {
 		nodes:    registry.New[resource.NodeSpec, resource.NodeStatus](store, resource.KindNode),
 		pools:    registry.New[resource.NodePoolSpec, resource.NodePoolStatus](store, resource.KindNodePool),
 	}
-	env.ctrl = controllers.NewSchedulerController(env.computes, env.nodes, env.pools, nil)
+	env.ctrl = controllers.NewSchedulerController(env.computes, env.nodes, env.pools, time.Minute, nil)
 	return env
 }
 
+// putNode seeds a node with a fresh heartbeat so it is schedulable.
 func (env *schedEnv) putNode(t *testing.T, uid string, cpus, mem, maxPods int, labels map[string]string) {
 	t.Helper()
-	if err := env.nodes.Put(&resource.Node{
+	env.putNodeSeen(t, uid, cpus, mem, maxPods, labels, time.Now())
+}
+
+// putNodeSeen seeds a node whose last heartbeat was at lastSeen.
+func (env *schedEnv) putNodeSeen(t *testing.T, uid string, cpus, mem, maxPods int, labels map[string]string, lastSeen time.Time) {
+	t.Helper()
+	n := &resource.Node{
 		Metadata: resource.ObjectMeta{UID: uid, Generation: 1},
 		Spec:     resource.NodeSpec{Hostname: uid, Address: "10.0.0.2", Labels: labels, Capacity: resource.NodeCapacity{CPUs: cpus, MemoryMB: mem, MaxPods: maxPods}},
-	}); err != nil {
+	}
+	n.Status.LastSeen = lastSeen.UTC().Format(time.RFC3339)
+	if err := env.nodes.Put(n); err != nil {
 		t.Fatalf("seed node: %v", err)
 	}
 }
@@ -138,6 +148,45 @@ func TestSchedulePoolSelector(t *testing.T) {
 	p, _ := env.pools.Get("pool-b")
 	if p.Status.TotalNodes != 1 || p.Status.ReadyNodes != 1 {
 		t.Fatalf("pool status wrong: total=%d ready=%d", p.Status.TotalNodes, p.Status.ReadyNodes)
+	}
+}
+
+func TestScheduleSkipsStaleNodes(t *testing.T) {
+	t.Parallel()
+
+	env := newSchedEnv(t)
+	env.putNodeSeen(t, "node-stale", 4, 8192, 10, nil, time.Now().Add(-time.Hour))
+	env.putCompute(t, "i-1", 1, 256, "", "")
+
+	if err := env.ctrl.Reconcile(context.Background()); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	c, _ := env.computes.Get("i-1")
+	if c.Status.NodeName != "" {
+		t.Fatalf("compute should not land on a stale node, got %q", c.Status.NodeName)
+	}
+	n, _ := env.nodes.Get("node-stale")
+	if n.Status.Phase != resource.PhasePending {
+		t.Fatalf("stale node phase = %q, want Pending", n.Status.Phase)
+	}
+}
+
+func TestScheduleNeverSeenNodeNotReady(t *testing.T) {
+	t.Parallel()
+
+	env := newSchedEnv(t)
+	if err := env.nodes.Put(&resource.Node{
+		Metadata: resource.ObjectMeta{UID: "node-1", Generation: 1},
+		Spec:     resource.NodeSpec{Hostname: "h1", Address: "10.0.0.2", Capacity: resource.NodeCapacity{CPUs: 4, MemoryMB: 8192, MaxPods: 10}},
+	}); err != nil { // no LastSeen
+		t.Fatalf("seed node: %v", err)
+	}
+	env.putCompute(t, "i-1", 1, 256, "", "")
+	if err := env.ctrl.Reconcile(context.Background()); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if c, _ := env.computes.Get("i-1"); c.Status.NodeName != "" {
+		t.Fatalf("compute should not land on a never-seen node, got %q", c.Status.NodeName)
 	}
 }
 

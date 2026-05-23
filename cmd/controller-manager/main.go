@@ -52,7 +52,7 @@ func run() error {
 	lease := controllers.NewLease(store, "leases/controller-manager", holderID(), *ttl, nil)
 	mgr := controllers.NewManager(lease, *interval, logger)
 	mgr.Add(controllers.NewVPCSummaryController(vpcs, logger))
-	mgr.Add(controllers.NewSchedulerController(computes, nodes, nodePools, logger))
+	mgr.Add(controllers.NewSchedulerController(computes, nodes, nodePools, 4*(*interval), logger))
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
