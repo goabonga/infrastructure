@@ -11,6 +11,10 @@ const (
 	KindLBBackend    = "lb_backend"
 )
 
+// LoadBalancerFinalizer is attached by the agent so the IPVS virtual service and
+// its VIP are removed before the load-balancer record is deleted.
+const LoadBalancerFinalizer = "infra.io/load-balancer"
+
 // LoadBalancerSpec is the desired state of a layer-4 load balancer fronting a
 // pool of compute backends within a VPC.
 type LoadBalancerSpec struct {
