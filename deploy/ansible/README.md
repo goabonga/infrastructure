@@ -8,12 +8,13 @@ start the services. Use this to test the `.deb` artifacts on real machines.
 On the libvirt host:
 
 - `libvirtd`, `virt-install`, `qemu-img` and `cloud-image-utils` (`cloud-localds`)
-- A Debian 12 generic cloud image at the path in `group_vars/all.yml`
-  (`base_image`), for example:
+- An Ubuntu 24.04 (noble) cloud image at the path in `group_vars/all.yml`
+  (`base_image`). The upstream `.img` is already a qcow2 and is BIOS-bootable,
+  for example:
 
   ```bash
-  curl -L -o /var/lib/libvirt/images/debian-12-genericcloud-amd64.qcow2 \
-    https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2
+  curl -L -o /var/lib/libvirt/images/noble-server-cloudimg-amd64.img \
+    https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
   ```
 
 - An SSH key at `~/.ssh/id_ed25519.pub` (or change `ssh_public_key`).

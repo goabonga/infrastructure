@@ -4,12 +4,12 @@
 # libvirt / cloud-image settings (used by create-vms.yml on the host).
 libvirt_uri: "qemu:///system"
 images_dir: "/var/lib/libvirt/images"
-# A Debian 12 generic cloud image; download it once into images_dir.
-base_image: "/var/lib/libvirt/images/debian-12-genericcloud-amd64.qcow2"
-os_variant: "debian12"
+# An Ubuntu 24.04 (noble) cloud image; download it once into images_dir (see README).
+base_image: "/var/lib/libvirt/images/noble-server-cloudimg-amd64.img"
+os_variant: "ubuntu24.04"
 network: "default"
 disk_size: "10G"
-vm_user: "debian"
+vm_user: "ubuntu"
 ssh_public_key: "{{ lookup('file', lookup('env', 'HOME') + '/.ssh/id_ed25519.pub') }}"
 
 # Test topology: one control-plane host and two agents.

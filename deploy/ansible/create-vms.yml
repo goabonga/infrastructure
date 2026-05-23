@@ -29,7 +29,7 @@
 
     - name: Fail when the base image is missing
       ansible.builtin.fail:
-        msg: "Base image {{ base_image }} not found. Download a Debian 12 generic cloud qcow2 into {{ images_dir }}."
+        msg: "Base image {{ base_image }} not found. Place an Ubuntu 24.04 cloud qcow2 into {{ images_dir }}."
       when: not base_image_stat.stat.exists
 
     - name: List existing domains
