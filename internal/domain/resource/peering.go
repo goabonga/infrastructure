@@ -8,6 +8,10 @@ import "fmt"
 // KindPeering is the resource kind for VPC peerings.
 const KindPeering = "peering"
 
+// PeeringFinalizer is attached by the agent so the veth link between the two VPC
+// bridges is removed before the peering record is deleted.
+const PeeringFinalizer = "infra.io/peering"
+
 // PeeringSpec connects two VPCs so workloads can route between them.
 type PeeringSpec struct {
 	VPC1ID string `json:"vpc1Id"`
