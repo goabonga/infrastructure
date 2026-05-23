@@ -20,6 +20,11 @@ ready window (four reconcile intervals). A node that has never heartbeated, or
 whose heartbeat is stale, is marked `Pending` and excluded from placement; the
 node pool's ready count tracks only live nodes.
 
+When a node goes stale or is deleted, the scheduler **evicts** the compute placed
+on it - clearing `status.nodeName` so it is rescheduled onto a live node the same
+pass. (A still-running but unreachable node's workload is not stopped; eviction
+only re-places the record.)
+
 ## Placement
 
 Each reconcile pass the scheduler:
