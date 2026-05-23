@@ -68,7 +68,10 @@ func run() error {
 	dnsRecords := registry.New[resource.DNSRecordSpec, resource.DNSRecordStatus](store, resource.KindDNSRecord)
 	lbs := registry.New[resource.LoadBalancerSpec, resource.LoadBalancerStatus](store, resource.KindLoadBalancer)
 	lbBackends := registry.New[resource.LBBackendSpec, resource.LBBackendStatus](store, resource.KindLBBackend)
+	nodes := registry.New[resource.NodeSpec, resource.NodeStatus](store, resource.KindNode)
+	nodeID := os.Getenv("GOA_NODE_ID")
 	agent := manager.NewAgent(*interval, logger,
+		manager.NewNodeHeartbeat(nodes, nodeID),
 		manager.NewVPCReconciler(vpcs, net),
 		manager.NewSubnetReconciler(subnets, vpcs, net),
 		manager.NewIGWReconciler(igws, vpcs, net),
@@ -77,7 +80,7 @@ func run() error {
 		manager.NewDiskReconciler(disks, manager.NewExecDiskBackend(filepath.Join(*stateDir, "disks")), master),
 		manager.NewSecurityGroupReconciler(sgs, sgRules, manager.NewExecSecurityGroup()),
 		manager.NewACLReconciler(acls, manager.NewExecFirewall()),
-		manager.NewComputeReconciler(computes, subnets, vpcs, disks, sgs, manager.NewExecComputeBackend(*stateDir), os.Getenv("GOA_NODE_ID")),
+		manager.NewComputeReconciler(computes, subnets, vpcs, disks, sgs, manager.NewExecComputeBackend(*stateDir), nodeID),
 		manager.NewWAFReconciler(wafPolicies, wafRules, computes, subnets, igws, vpcs, manager.NewExecWAF()),
 		manager.NewLoadBalancerReconciler(lbs, lbBackends, computes, vpcs, manager.NewExecLB()),
 	)
