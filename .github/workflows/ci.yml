@@ -302,8 +302,13 @@ jobs:
       - govulncheck
       - osv-scanner
       - integration
+    # www is gated on www_changed, so it is skipped on non-frontend pushes. A
+    # skipped need would skip release too, so tolerate skips (!cancelled) and
+    # only block on real failures (!failure) rather than requiring success.
     if: >-
-      github.event_name == 'push'
+      !cancelled()
+      && !failure()
+      && github.event_name == 'push'
       && github.ref == 'refs/heads/main'
       && needs.detect.outputs.has_package_changes == 'true'
     runs-on: ubuntu-latest
