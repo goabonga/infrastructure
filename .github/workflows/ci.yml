@@ -68,6 +68,9 @@ jobs:
           # Docs / integration detection via git diff (no tag exists for them).
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             BASE="origin/${{ github.base_ref }}"
+          elif git rev-parse --verify --quiet "${{ github.event.before }}^{commit}" > /dev/null 2>&1; then
+            # Diff the whole pushed range, not just the last commit.
+            BASE="${{ github.event.before }}"
           elif git rev-parse HEAD^ > /dev/null 2>&1; then
             BASE="HEAD^"
           else
@@ -141,7 +144,9 @@ jobs:
   www:
     name: www
     needs: detect
-    if: needs.detect.outputs.www_changed == 'true'
+    # Run on www changes (PRs) and on every main push, so the frontend gate is
+    # validated before a release can publish infra-www.
+    if: needs.detect.outputs.www_changed == 'true' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     defaults:
       run:
