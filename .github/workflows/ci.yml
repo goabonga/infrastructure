@@ -469,6 +469,16 @@ jobs:
           version=$(uv tool run multicz get "$component")
           tag="${component}-v${version}"
           mkdir -p dist
+          # infra-spa is the standalone SPA bundle (no Go binary): build it and
+          # ship www/dist as a tarball release asset.
+          if [ "$component" = "infra-spa" ]; then
+            ( cd www && npm ci && npm run build )
+            tar -czf "dist/infra-spa_${version}_dist.tar.gz" -C www/dist .
+            ( cd dist && sha256sum infra-spa_${version}_* > "infra-spa_${version}_checksums.txt" )
+            notes=$(uv tool run multicz release-notes --tag "$tag" || echo "Release $tag")
+            gh release create "$tag" --title "$tag" --notes "$notes" dist/infra-spa_${version}_*
+            exit 0
+          fi
           for platform in linux/amd64 linux/arm64; do
             os="${platform%/*}"; arch="${platform#*/}"
             out="dist/${component}_${version}_${os}_${arch}"
