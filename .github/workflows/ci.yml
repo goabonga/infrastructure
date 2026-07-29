@@ -31,11 +31,12 @@ jobs:
     name: detect changed components
     runs-on: ubuntu-latest
     outputs:
-      packages: ${{ steps.changed.outputs.packages }}
-      has_package_changes: ${{ steps.changed.outputs.has_package_changes }}
-      docs_changed: ${{ steps.changed.outputs.docs_changed }}
-      integration_changed: ${{ steps.changed.outputs.integration_changed }}
-      www_changed: ${{ steps.changed.outputs.www_changed }}
+      packages: ${{ steps.bypass.outputs.packages || steps.changed.outputs.packages }}
+      has_package_changes: ${{ steps.bypass.outputs.has_package_changes || steps.changed.outputs.has_package_changes }}
+      docs_changed: ${{ steps.bypass.outputs.docs_changed || steps.changed.outputs.docs_changed }}
+      integration_changed: ${{ steps.bypass.outputs.integration_changed || steps.changed.outputs.integration_changed }}
+      www_changed: ${{ steps.bypass.outputs.www_changed || steps.changed.outputs.www_changed }}
+      release_commit: ${{ steps.bypass.outputs.active || 'false' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -47,8 +48,49 @@ jobs:
         run: uv tool install multicz
       - name: Validate multicz configuration
         run: uv tool run multicz validate --strict
+      # The `release` job pushes multicz's own chore(release) commit back to
+      # main, which re-triggers this workflow. Everything in that commit is
+      # generated (version constants, changelogs, state file) and every
+      # artifact it names was already published by the run that created it, so
+      # replaying the graph would rebuild byte-identical outputs and race the
+      # release it descends from. Report an empty change set instead; every
+      # gated job downstream skips, and detect itself still runs as a smoke
+      # check.
+      - id: bypass
+        name: Short-circuit multicz release commits
+        if: startsWith(github.event.head_commit.message, 'chore(release):')
+        env:
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+          {
+            echo "active=true"
+            echo "packages=[]"
+            echo "has_package_changes=false"
+            echo "docs_changed=false"
+            echo "integration_changed=false"
+            echo "www_changed=false"
+          } >> "$GITHUB_OUTPUT"
+          # multicz shapes the subject as
+          # `chore(release): bump infra-api 0.1.1 -> 0.1.2, infra-cli ...`.
+          # Split on the commas to render one bullet per component.
+          subject=$(printf '%s\n' "$COMMIT_MESSAGE" | head -n1)
+          {
+            printf '## chore(release) - pipeline short-circuited\n\n'
+            printf 'This run targets multicz'"'"'s own release commit (`%s`).\n' \
+              "${GITHUB_SHA:0:7}"
+            printf 'Binaries, `.deb` packages and GitHub Releases were already\n'
+            printf 'produced by the `release` -> `publish` chain that authored it.\n\n'
+            printf '### Versions published\n\n'
+            printf '%s' "${subject#chore(release): bump }" \
+              | tr ',' '\n' | sed -E 's/^ *//; s/^/- /'
+            printf '\n\n### Skipped\n\n'
+            printf 'Every quality, integration, release, publish and docs job\n'
+            printf 'skips on this commit via the empty change set below.\n'
+          } >> "$GITHUB_STEP_SUMMARY"
       - id: changed
         name: Compute changed components
+        if: ${{ !startsWith(github.event.head_commit.message, 'chore(release):') }}
         run: |
           set -euo pipefail
           if [ "${{ github.event_name }}" = "pull_request" ]; then
@@ -145,8 +187,13 @@ jobs:
     name: www
     needs: detect
     # Run on www changes (PRs) and on every main push, so the frontend gate is
-    # validated before a release can publish infra-www.
-    if: needs.detect.outputs.www_changed == 'true' || github.ref == 'refs/heads/main'
+    # validated before a release can publish infra-www. The unconditional
+    # main-push arm has to yield to the release-commit bypass explicitly - it
+    # would otherwise be the one job that still runs on a chore(release) push.
+    if: >-
+      needs.detect.outputs.release_commit != 'true'
+      && (needs.detect.outputs.www_changed == 'true'
+          || github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     defaults:
       run:
