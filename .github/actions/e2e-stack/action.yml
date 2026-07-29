@@ -125,18 +125,44 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        # imagePullPolicy Never: the images were side-loaded into kind and have
-        # no registry to be pulled from. The chart's own default is Always,
-        # which is right in production and fatal here.
+        # Three overrides, all of them consequences of side-loading images
+        # into kind rather than pulling them:
+        #
+        #   registry   - `docker load` of a `docker save` archive lands under
+        #                containerd's default namespace, docker.io/library.
+        #   pullPolicy - the chart defaults to Always, which is right in
+        #                production and fatal here: there is no registry
+        #                holding these tags.
+        #   tag        - the archives carry `:ci`, not a version. Without this
+        #                every pod sits in ErrImageNeverPull asking for
+        #                `:0.0.0` and `--wait` burns its whole timeout before
+        #                saying anything useful.
         helm install infra charts/infra \
           --namespace infra \
           --set image.registry=docker.io/library \
           --set image.pullPolicy=Never \
+          --set components.api.image.tag=ci \
+          --set components.controller-manager.image.tag=ci \
+          --set components.idp.image.tag=ci \
+          --set components.exporter.image.tag=ci \
+          --set components.www.image.tag=ci \
           --set state.existingSecret=infra-state \
           --set components.idp.enabled=true \
           --set components.idp.existingSecret=infra-idp-clients \
-          --wait --timeout 300s
+          --wait --timeout 180s
         kubectl -n infra get pods -o wide
+
+    # Inside the action, so both consumers get it. The install above fails by
+    # timing out, and a timeout says nothing about why - the pod state does, and
+    # it is gone as soon as the runner is reclaimed.
+    - name: Dump cluster state on failure
+      if: failure()
+      shell: bash
+      run: |
+        kubectl -n infra get pods -o wide || true
+        kubectl -n infra describe pods || true
+        kubectl -n infra logs -l app.kubernetes.io/part-of=infra \
+          --tail=200 --all-containers || true
 
     - name: Port-forward the listening components
       shell: bash
