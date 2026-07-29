@@ -18,6 +18,24 @@ permissions:
   contents: read
 
 jobs:
+  # Config sanity ahead of everything else. `multicz validate --strict` catches
+  # a component whose `paths` match nothing, a `bump_files` entry pointing at a
+  # missing file or an unparseable version constant, a broken cascade edge, a
+  # tag_format collision. Its own job rather than a step inside `detect`: those
+  # are the failures that make `multicz changed` return a plausible-looking but
+  # wrong answer, and a distinct red job names the cause instead of burying it
+  # in the change-detection log.
+  validate:
+    name: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: goabonga/multicz-action@95e90628797bc7dec0d2ad7d9abc6278f3465ed2 # v1.1.0
+      - name: multicz validate --strict
+        run: multicz validate --strict
+
   # Detect which components changed since the comparison ref. On PR: vs the
   # target branch. On main: vs each component's last tag (multicz default),
   # which scopes the release matrix to bump-worthy work. multicz is
@@ -29,6 +47,7 @@ jobs:
   # against. We use a plain `git diff` on their paths instead.
   detect:
     name: detect changed components
+    needs: validate
     runs-on: ubuntu-latest
     outputs:
       packages: ${{ steps.bypass.outputs.packages || steps.changed.outputs.packages }}
@@ -41,13 +60,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: false
-      - name: Install multicz
-        run: uv tool install multicz
-      - name: Validate multicz configuration
-        run: uv tool run multicz validate --strict
+      - uses: goabonga/multicz-action@95e90628797bc7dec0d2ad7d9abc6278f3465ed2 # v1.1.0
       # The `release` job pushes multicz's own chore(release) commit back to
       # main, which re-triggers this workflow. Everything in that commit is
       # generated (version constants, changelogs, state file) and every
@@ -95,10 +108,10 @@ jobs:
           set -euo pipefail
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             REF="origin/${{ github.base_ref }}"
-            ALL=$(uv tool run multicz changed --since "$REF" --output json | jq -c '.changed')
+            ALL=$(multicz changed --since "$REF" --output json | jq -c '.changed')
           else
             REF="each component's last tag"
-            ALL=$(uv tool run multicz changed --output json | jq -c '.changed')
+            ALL=$(multicz changed --output json | jq -c '.changed')
           fi
           PACKAGES=$(echo "$ALL" | jq -c '.')
           echo "packages=$PACKAGES" >> "$GITHUB_OUTPUT"
@@ -379,11 +392,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: false
-      - name: Install multicz
-        run: uv tool install multicz
+      - uses: goabonga/multicz-action@95e90628797bc7dec0d2ad7d9abc6278f3465ed2 # v1.1.0
       - name: Configure git author
         run: |
           NAME="${{ github.event.head_commit.author.name }}"
@@ -420,7 +429,7 @@ jobs:
         id: plan
         run: |
           set -euo pipefail
-          uv tool run multicz plan \
+          multicz plan \
             --summary "$GITHUB_STEP_SUMMARY" --output json > /tmp/plan.json
           if [ "$(jq '.bumps | length' /tmp/plan.json)" = "0" ]; then
             echo "release=false" >> "$GITHUB_OUTPUT"
@@ -441,7 +450,7 @@ jobs:
           if [ "${{ steps.gpg.outputs.available }}" = "true" ]; then
             args+=(--sign)
           fi
-          uv tool run multicz "${args[@]}" | tee /tmp/bump.raw
+          multicz "${args[@]}" | tee /tmp/bump.raw
           # multicz interleaves `post_bump: go mod tidy` progress lines on
           # stdout BEFORE the final JSON object, so the raw output is not
           # parseable as-is. Drop everything preceding the document's opening
@@ -492,11 +501,7 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: www/package-lock.json
-      - uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: false
-      - name: Install multicz
-        run: uv tool install multicz
+      - uses: goabonga/multicz-action@95e90628797bc7dec0d2ad7d9abc6278f3465ed2 # v1.1.0
       - name: Build release binaries
         env:
           GH_TOKEN: ${{ github.token }}
@@ -515,7 +520,7 @@ jobs:
             find cmd/www/dist -mindepth 1 ! -name .gitkeep -delete
             cp -r www/dist/. cmd/www/dist/
           fi
-          version=$(uv tool run multicz get "$component")
+          version=$(multicz get "$component")
           tag="${component}-v${version}"
           mkdir -p dist
           # infra-spa is the standalone SPA bundle (no Go binary): build it and
@@ -524,7 +529,7 @@ jobs:
             ( cd www && npm ci && npm run build )
             tar -czf "dist/infra-spa_${version}_dist.tar.gz" -C www/dist .
             ( cd dist && sha256sum infra-spa_${version}_* > "infra-spa_${version}_checksums.txt" )
-            notes=$(uv tool run multicz release-notes --tag "$tag" || echo "Release $tag")
+            notes=$(multicz release-notes --tag "$tag" || echo "Release $tag")
             gh release create "$tag" --title "$tag" --notes "$notes" dist/infra-spa_${version}_*
             exit 0
           fi
@@ -543,7 +548,7 @@ jobs:
           fi
           ( cd dist && sha256sum ${component}_${version}_* > "${component}_${version}_checksums.txt" )
           ls -l dist
-          notes=$(uv tool run multicz release-notes --tag "$tag" || echo "Release $tag")
+          notes=$(multicz release-notes --tag "$tag" || echo "Release $tag")
           gh release create "$tag" \
             --title "$tag" \
             --notes "$notes" \
