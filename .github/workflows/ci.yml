@@ -366,49 +366,51 @@ jobs:
           KEY_ID=$(gpg --list-secret-keys --with-colons \
             | awk -F: '/^sec/{print $5; exit}')
           git config user.signingkey "$KEY_ID"
+      # Gate the bump on a non-empty plan. Without this the bump step runs on
+      # every main push and has to be treated as "succeeded with no output",
+      # which hides real failures behind the same empty-output signature.
       - name: Plan release
-        run: uv tool run multicz plan --summary "$GITHUB_STEP_SUMMARY"
-      - name: Bump, commit, tag, push (signed)
-        id: bump_signed
-        if: steps.gpg.outputs.available == 'true'
+        id: plan
         run: |
           set -euo pipefail
-          PLAN=$(uv tool run multicz bump --commit --tag --push --sign --output json)
-          BUMPED=$(echo "$PLAN" | jq -r '.bumps | keys | join(" ")')
-          BUMPED_JSON=$(echo "$PLAN" | jq -c '.bumps | keys')
-          echo "bumped=$BUMPED" >> "$GITHUB_OUTPUT"
-          echo "bumped_json=$BUMPED_JSON" >> "$GITHUB_OUTPUT"
-          if [ -z "$BUMPED" ]; then
-            echo "no_bumps=true" >> "$GITHUB_OUTPUT"
+          uv tool run multicz plan \
+            --summary "$GITHUB_STEP_SUMMARY" --output json > /tmp/plan.json
+          if [ "$(jq '.bumps | length' /tmp/plan.json)" = "0" ]; then
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "no bumps pending"
           else
-            echo "no_bumps=false" >> "$GITHUB_OUTPUT"
+            echo "release=true" >> "$GITHUB_OUTPUT"
           fi
       - name: Bump, commit, tag, push
-        id: bump_unsigned
-        if: steps.gpg.outputs.available != 'true'
+        id: bump
+        if: steps.plan.outputs.release == 'true'
         run: |
           set -euo pipefail
-          PLAN=$(uv tool run multicz bump --commit --tag --push --output json)
-          BUMPED=$(echo "$PLAN" | jq -r '.bumps | keys | join(" ")')
-          BUMPED_JSON=$(echo "$PLAN" | jq -c '.bumps | keys')
+          args=(bump --commit --tag --push
+                --summary "$GITHUB_STEP_SUMMARY" --output json)
+          # --sign covers both the release commit and the tags. Omitted rather
+          # than passed false when no key is configured: the flag never
+          # disables signing, so there is no negative form to pass.
+          if [ "${{ steps.gpg.outputs.available }}" = "true" ]; then
+            args+=(--sign)
+          fi
+          uv tool run multicz "${args[@]}" | tee /tmp/bump.raw
+          # multicz interleaves `post_bump: go mod tidy` progress lines on
+          # stdout BEFORE the final JSON object, so the raw output is not
+          # parseable as-is. Drop everything preceding the document's opening
+          # brace, then assert the remainder really is JSON - an empty
+          # `bumped` reads exactly like "nothing to release" downstream and
+          # would silently skip publish + docs.
+          sed -n '/^{/,$p' /tmp/bump.raw > /tmp/bump.json
+          jq -e . /tmp/bump.json > /dev/null
+          BUMPED=$(jq -r '.bumps | keys | join(" ")' /tmp/bump.json)
+          BUMPED_JSON=$(jq -c '.bumps | keys' /tmp/bump.json)
           echo "bumped=$BUMPED" >> "$GITHUB_OUTPUT"
           echo "bumped_json=$BUMPED_JSON" >> "$GITHUB_OUTPUT"
           if [ -z "$BUMPED" ]; then
             echo "no_bumps=true" >> "$GITHUB_OUTPUT"
           else
             echo "no_bumps=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Resolve release outputs
-        id: bump
-        run: |
-          if [ "${{ steps.gpg.outputs.available }}" = "true" ]; then
-            echo 'bumped=${{ steps.bump_signed.outputs.bumped }}' >> "$GITHUB_OUTPUT"
-            echo 'bumped_json=${{ steps.bump_signed.outputs.bumped_json }}' >> "$GITHUB_OUTPUT"
-            echo 'no_bumps=${{ steps.bump_signed.outputs.no_bumps }}' >> "$GITHUB_OUTPUT"
-          else
-            echo 'bumped=${{ steps.bump_unsigned.outputs.bumped }}' >> "$GITHUB_OUTPUT"
-            echo 'bumped_json=${{ steps.bump_unsigned.outputs.bumped_json }}' >> "$GITHUB_OUTPUT"
-            echo 'no_bumps=${{ steps.bump_unsigned.outputs.no_bumps }}' >> "$GITHUB_OUTPUT"
           fi
 
   # Build and publish the bumped components: cross-compiled binaries attached
