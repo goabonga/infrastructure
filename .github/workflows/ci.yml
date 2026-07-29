@@ -894,8 +894,10 @@ jobs:
 
   chart-checkov:
     name: chart-checkov
-    needs: chart-lint
-    if: "!cancelled() && !failure()"
+    needs: [detect, chart-lint]
+    if: >-
+      !cancelled() && !failure()
+      && needs.detect.outputs.chart_changed == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -940,8 +942,10 @@ jobs:
 
   chart-package:
     name: chart-package
-    needs: chart-checkov
-    if: "!cancelled() && !failure()"
+    needs: [detect, chart-checkov]
+    if: >-
+      !cancelled() && !failure()
+      && needs.detect.outputs.chart_changed == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -969,6 +973,107 @@ jobs:
           title: chart-package
           body: Packaged the chart as artifact `infra-chart`.
 
+  # ---------------------------------------------------------------------
+  # End-to-end and DAST. Both bring the control plane up on kind through the
+  # Helm chart, so they exercise what an operator installs rather than a
+  # bespoke test rig. Each job builds its own cluster: a shared one would make
+  # a ZAP failure and an e2e failure indistinguishable, and the runners are
+  # parallel anyway.
+  # ---------------------------------------------------------------------
+
+  e2e:
+    name: e2e
+    needs: [detect, grype, chart-package]
+    if: >-
+      !cancelled() && !failure()
+      && needs.detect.outputs.has_package_changes == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read # pull the last release of any component this run did not build
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - id: owner
+        run: |
+          set -euo pipefail
+          echo "value=$(printf '%s' '${{ github.repository_owner }}' \
+            | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/e2e-stack
+        with:
+          owner: ${{ steps.owner.outputs.value }}
+          token: ${{ github.token }}
+      - name: Run the end-to-end suite
+        run: test/e2e/smoke.sh
+      # The pod state at the moment of failure is the whole diagnosis, and it
+      # is gone once the runner is reclaimed.
+      - name: Dump cluster state on failure
+        if: failure()
+        run: |
+          kubectl -n infra get pods -o wide || true
+          kubectl -n infra describe pods || true
+          kubectl -n infra logs -l app.kubernetes.io/part-of=infra \
+            --tail=200 --all-containers || true
+      - name: Summary
+        if: always()
+        uses: ./.github/actions/summary
+        with:
+          title: e2e
+          body: |
+            `charts/infra` deployed to kind against PostgreSQL, then
+            `test/e2e/smoke.sh` over the API, identity provider, exporter and
+            dashboard.
+
+  owasp:
+    name: owasp (${{ matrix.name }})
+    needs: [detect, e2e]
+    # has_package_changes is repeated from `e2e` on purpose: a skipped `needs`
+    # does not skip the dependent job under `!cancelled() && !failure()`, so
+    # without this a docs-only push would build two kind clusters to scan a
+    # control plane nothing had changed.
+    if: >-
+      !cancelled() && !failure()
+      && needs.detect.outputs.has_package_changes == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: api
+            port: 8080
+          - name: www
+            port: 8088
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - id: owner
+        run: |
+          set -euo pipefail
+          echo "value=$(printf '%s' '${{ github.repository_owner }}' \
+            | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/e2e-stack
+        with:
+          owner: ${{ steps.owner.outputs.value }}
+          token: ${{ github.token }}
+      - uses: ./.github/actions/owasp-scan
+        with:
+          target: http://127.0.0.1:${{ matrix.port }}
+          name: ${{ matrix.name }}
+      - name: Summary
+        if: always()
+        uses: ./.github/actions/summary
+        with:
+          title: owasp (${{ matrix.name }})
+          body: |
+            ZAP baseline against `${{ matrix.name }}` on port
+            `${{ matrix.port }}`, gated by `.zap/rules.tsv`. Full report in
+            artifact `zap-${{ matrix.name }}`.
+
   # Release on main only. multicz bumps cmd/<dir>/version.go, writes
   # changelogs, creates the release commit and per-component tags, and pushes
   # back to main. Artifact distribution is handled by the `publish` job.
@@ -989,6 +1094,8 @@ jobs:
       - grype
       - deb-validate
       - chart-package
+      - e2e
+      - owasp
     # www is gated on www_changed, so it is skipped on non-frontend pushes. A
     # skipped need would skip release too, so tolerate skips (!cancelled) and
     # only block on real failures (!failure) rather than requiring success.
