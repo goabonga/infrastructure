@@ -662,6 +662,146 @@ jobs:
             grype at `--fail-on high` against the
             `${{ matrix.component }}` SBOM: `${{ steps.probe.outputs.exists }}`.
 
+  # ---------------------------------------------------------------------
+  # Debian packaging chain. Every component except infra-www and infra-spa
+  # ships as a .deb - the two frontend components are served, not installed.
+  # The .deb the release publishes is the artifact this chain cleared, not a
+  # rebuild of it.
+  # ---------------------------------------------------------------------
+
+  deb:
+    name: deb (${{ matrix.component }})
+    needs: [detect, lint, vet-build, test, gosec, govulncheck, osv-scanner]
+    if: >-
+      !cancelled() && !failure()
+      && needs.detect.outputs.has_package_changes == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        component:
+          - infra
+          - infra-api
+          - infra-idp
+          - infra-exporter
+          - infra-controller-manager
+          - infra-agent
+          - infra-container-init
+          - terraform-provider-infra
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      # The .deb carries the version in its filename and its control file, so
+      # it has to be the version the release will publish.
+      - uses: ./.github/actions/bump-preview
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - id: skip
+        name: Skip components this push did not touch
+        env:
+          PACKAGES: ${{ needs.detect.outputs.packages }}
+          COMPONENT: ${{ matrix.component }}
+        run: |
+          set -euo pipefail
+          if echo "$PACKAGES" | jq -e --arg c "$COMPONENT" 'index($c)' > /dev/null; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "$COMPONENT unchanged; skipping .deb build"
+          fi
+      - name: Build the ${{ matrix.component }} .deb
+        if: steps.skip.outputs.build == 'true'
+        run: |
+          set -euo pipefail
+          version=$(multicz get '${{ matrix.component }}')
+          # amd64 only here. The gates below install and start the package on
+          # the runner, which an arm64 .deb cannot do; the release path builds
+          # both architectures from the same script.
+          ARCH=amd64 ./packaging/build-debs.sh "$version" '${{ matrix.component }}'
+      - uses: actions/upload-artifact@v7
+        if: steps.skip.outputs.build == 'true'
+        with:
+          name: ${{ matrix.component }}-deb
+          path: dist/${{ matrix.component }}_*_amd64.deb
+          retention-days: 1
+      - name: Summary
+        if: always()
+        uses: ./.github/actions/summary
+        with:
+          title: deb (${{ matrix.component }})
+          body: |
+            Built: `${{ steps.skip.outputs.build }}`. amd64 package uploaded as
+            `${{ matrix.component }}-deb`.
+
+  deb-validate:
+    name: deb-validate (${{ matrix.component }})
+    needs: deb
+    if: "!cancelled() && !failure()"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write # delete the artifact of a package that fails validation
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: infra
+            has_unit: "false"
+          - component: infra-container-init
+            has_unit: "false"
+          - component: terraform-provider-infra
+            has_unit: "false"
+          - component: infra-api
+            has_unit: "true"
+          - component: infra-idp
+            has_unit: "true"
+          - component: infra-exporter
+            has_unit: "true"
+          - component: infra-controller-manager
+            has_unit: "true"
+          # infra-agent reconciles kernel state, so its unit cannot take the
+          # hardening the control-plane daemons do - see
+          # deploy/systemd/infra-agent.service for which directives would
+          # break which reconciler. 75 holds the line at its current 7.2
+          # without pretending it can reach 1.1.
+          - component: infra-agent
+            has_unit: "true"
+            security_threshold: "75"
+    steps:
+      - uses: actions/checkout@v6
+      - id: probe
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh api --paginate \
+               "/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts?per_page=100" \
+               --jq '.artifacts[].name' | grep -qx "${{ matrix.component }}-deb"; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "no .deb artifact for ${{ matrix.component }}; nothing to validate"
+          fi
+      - uses: ./.github/actions/validate-deb
+        if: steps.probe.outputs.exists == 'true'
+        with:
+          component: ${{ matrix.component }}
+          has-unit: ${{ matrix.has_unit }}
+          security-threshold: ${{ matrix.security_threshold || '11' }}
+      - name: Summary
+        if: always()
+        uses: ./.github/actions/summary
+        with:
+          title: deb-validate (${{ matrix.component }})
+          body: |
+            Validated: `${{ steps.probe.outputs.exists }}`. lintian
+            (`--fail-on error`), `test/install/validate.sh` against the
+            installed package, and `systemd-analyze security` at threshold
+            `${{ matrix.security_threshold || '11' }}`.
+
   # Release on main only. multicz bumps cmd/<dir>/version.go, writes
   # changelogs, creates the release commit and per-component tags, and pushes
   # back to main. Artifact distribution is handled by the `publish` job.
@@ -680,6 +820,7 @@ jobs:
       - integration
       - hadolint
       - grype
+      - deb-validate
     # www is gated on www_changed, so it is skipped on non-frontend pushes. A
     # skipped need would skip release too, so tolerate skips (!cancelled) and
     # only block on real failures (!failure) rather than requiring success.
@@ -827,9 +968,34 @@ jobs:
           cache: npm
           cache-dependency-path: www/package-lock.json
       - uses: goabonga/multicz-action@95e90628797bc7dec0d2ad7d9abc6278f3465ed2 # v1.1.0
+      # Reuse the amd64 .deb the deb-validate chain already installed, started
+      # and scored, instead of rebuilding it here. Rebuilding would publish a
+      # package nothing had validated - identical in intent, unverified in
+      # fact. A component bumped purely by cascade has no artifact (its own
+      # paths did not change), so probe rather than assume.
+      - id: has_deb
+        name: Check for a validated .deb from this run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh api --paginate \
+               "/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts?per_page=100" \
+               --jq '.artifacts[].name' | grep -qx "${{ matrix.component }}-deb"; then
+            echo "value=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=false" >> "$GITHUB_OUTPUT"
+            echo "no validated .deb for ${{ matrix.component }}; will build one"
+          fi
+      - uses: actions/download-artifact@v8
+        if: steps.has_deb.outputs.value == 'true'
+        with:
+          name: ${{ matrix.component }}-deb
+          path: dist
       - name: Build release binaries
         env:
           GH_TOKEN: ${{ github.token }}
+          HAS_VALIDATED_DEB: ${{ steps.has_deb.outputs.value }}
         run: |
           set -euo pipefail
           component="${{ matrix.component }}"
@@ -864,12 +1030,22 @@ jobs:
             CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
               go build -ldflags='-s -w' -o "$out" "./cmd/${dir}/"
           done
-          # Debian packages for the binary components (the web app ships as a
-          # container image instead).
+          # Debian packages for the binary components. infra-www ships as a
+          # container image instead.
+          #
+          # arm64 is always built here: deb-validate installs and starts the
+          # package on an amd64 runner, so an arm64 .deb cannot go through
+          # those gates and is published on the strength of the shared build
+          # script alone. amd64 is only rebuilt when the validated artifact is
+          # missing.
           if [ "$component" != "infra-www" ]; then
-            for arch in amd64 arm64; do
-              ARCH="$arch" ./packaging/build-debs.sh "$version" "$component"
-            done
+            ARCH=arm64 ./packaging/build-debs.sh "$version" "$component"
+            if [ "$HAS_VALIDATED_DEB" = "true" ]; then
+              echo "publishing the validated amd64 .deb from deb-validate"
+              ls -l "dist/${component}_${version}_amd64.deb"
+            else
+              ARCH=amd64 ./packaging/build-debs.sh "$version" "$component"
+            fi
           fi
           ( cd dist && sha256sum ${component}_${version}_* > "${component}_${version}_checksums.txt" )
           ls -l dist
@@ -917,12 +1093,15 @@ jobs:
       # artifacts would leave a second, unsigned copy of the same bits around
       # for anyone reading the run page to pick up by mistake.
       - name: Delete the consumed CI artifacts
-        if: steps.has_image.outputs.value == 'true'
+        if: >-
+          steps.has_image.outputs.value == 'true'
+          || steps.has_deb.outputs.value == 'true'
         uses: geekyeggo/delete-artifact@176a747ab7e287e3ff4787bf8a148716375ca118 # v6.0.0
         with:
           name: |
             ${{ matrix.component }}-image
             ${{ matrix.component }}-sbom
+            ${{ matrix.component }}-deb
           failOnError: false
       - name: Summary
         if: always()
@@ -931,9 +1110,10 @@ jobs:
           title: publish (${{ matrix.component }})
           body: |
             Cross-compiled `linux/amd64` + `linux/arm64`, packaged the `.deb`s
-            and cut the GitHub Release for `${{ matrix.component }}`. Container
-            image pushed and cosign-signed:
-            `${{ steps.has_image.outputs.value }}`.
+            and cut the GitHub Release for `${{ matrix.component }}`. Published
+            the validated amd64 `.deb`:
+            `${{ steps.has_deb.outputs.value }}`. Container image pushed and
+            cosign-signed: `${{ steps.has_image.outputs.value }}`.
 
   # Build the Zensical site and deploy to GitHub Pages. Gated on a successful
   # release bump: the site embeds version + changelog content, so every bump
