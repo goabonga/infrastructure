@@ -427,6 +427,241 @@ jobs:
             `go test -tags=integration` against a postgres service. The
             kernel-level cases (bridge, firewall) self-skip without root.
 
+  # ---------------------------------------------------------------------
+  # Container chain. Only the network daemons are containerised - see
+  # packaging/docker/Dockerfile for why infra-agent and infra-container-init
+  # are not. Each stage hands the previous one's artifact forward rather than
+  # rebuilding, so what gets scanned, signed and pushed is one identical
+  # image: container -> sbom -> grype -> (release) publish.
+  # ---------------------------------------------------------------------
+
+  hadolint:
+    name: hadolint
+    needs: detect
+    if: needs.detect.outputs.has_package_changes == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Lint the shared daemon Dockerfile
+        uses: hadolint/hadolint-action@2332a7b74a6de0dda2e2221d575162eba76ba5e5 # v3.3.0
+        with:
+          dockerfile: packaging/docker/Dockerfile
+          format: tty
+      - name: Lint the www Dockerfile
+        uses: hadolint/hadolint-action@2332a7b74a6de0dda2e2221d575162eba76ba5e5 # v3.3.0
+        with:
+          dockerfile: packaging/docker/www.Dockerfile
+          format: tty
+      - name: Summary
+        if: always()
+        uses: ./.github/actions/summary
+        with:
+          title: hadolint
+          body: "`hadolint` on both Dockerfiles under `packaging/docker/`."
+
+  container:
+    name: container (${{ matrix.component }})
+    # Behind the quality gates: an image is worth building only once the code
+    # in it compiles, passes tests and clears the scanners. Tolerates skips so
+    # a docs-only push does not strand the matrix.
+    needs: [detect, hadolint, lint, vet-build, test, gosec, govulncheck, osv-scanner]
+    if: >-
+      !cancelled() && !failure()
+      && needs.detect.outputs.has_package_changes == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: infra-api
+            cmd_dir: api
+            dockerfile: packaging/docker/Dockerfile
+          - component: infra-idp
+            cmd_dir: idp
+            dockerfile: packaging/docker/Dockerfile
+          - component: infra-exporter
+            cmd_dir: exporter
+            dockerfile: packaging/docker/Dockerfile
+          - component: infra-controller-manager
+            cmd_dir: controller-manager
+            dockerfile: packaging/docker/Dockerfile
+          - component: infra-www
+            cmd_dir: www
+            dockerfile: packaging/docker/www.Dockerfile
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      # The image carries its version as an OCI label, so it has to be the
+      # version the release will publish, not the last one it shipped.
+      - uses: ./.github/actions/bump-preview
+      - id: skip
+        name: Skip components this push did not touch
+        env:
+          PACKAGES: ${{ needs.detect.outputs.packages }}
+          COMPONENT: ${{ matrix.component }}
+        run: |
+          set -euo pipefail
+          if echo "$PACKAGES" | jq -e --arg c "$COMPONENT" 'index($c)' > /dev/null; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "$COMPONENT unchanged; skipping image build"
+          fi
+      - id: version
+        if: steps.skip.outputs.build == 'true'
+        run: |
+          set -euo pipefail
+          echo "value=$(multicz get '${{ matrix.component }}')" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        if: steps.skip.outputs.build == 'true'
+      - name: Build ${{ matrix.component }}:ci
+        if: steps.skip.outputs.build == 'true'
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          # load, not push: the image stays local, gets scanned, and is only
+          # pushed from the release path once grype has cleared it.
+          load: true
+          tags: ${{ matrix.component }}:ci
+          build-args: |
+            CMD_DIR=${{ matrix.cmd_dir }}
+            COMPONENT=${{ matrix.component }}
+            VERSION=${{ steps.version.outputs.value }}
+          cache-from: type=gha,scope=${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }},ignore-error=true
+      - name: Save image tarball
+        if: steps.skip.outputs.build == 'true'
+        run: docker save "${{ matrix.component }}:ci" -o "/tmp/${{ matrix.component }}.tar"
+      - uses: actions/upload-artifact@v7
+        if: steps.skip.outputs.build == 'true'
+        with:
+          name: ${{ matrix.component }}-image
+          path: /tmp/${{ matrix.component }}.tar
+          # Consumed within the same run by sbom / grype / publish, and
+          # deleted after publish. One day is slack, not storage.
+          retention-days: 1
+      - name: Summary
+        if: always()
+        uses: ./.github/actions/summary
+        with:
+          title: container (${{ matrix.component }})
+          body: |
+            Built: `${{ steps.skip.outputs.build }}`. Image
+            `${{ matrix.component }}:ci` at version
+            `${{ steps.version.outputs.value || 'n/a' }}`, saved to artifact
+            `${{ matrix.component }}-image`.
+
+  sbom:
+    name: sbom (${{ matrix.component }})
+    needs: container
+    if: "!cancelled() && !failure()"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        component:
+          - infra-api
+          - infra-idp
+          - infra-exporter
+          - infra-controller-manager
+          - infra-www
+    steps:
+      - uses: actions/checkout@v6
+      # The upstream leg skips components this push did not touch, so there
+      # may be no artifact. Probe rather than fail: a partial-change run is
+      # the normal case, not an error.
+      - id: probe
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh api --paginate                "/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts?per_page=100"                --jq '.artifacts[].name' | grep -qx "${{ matrix.component }}-image"; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "no image artifact for ${{ matrix.component }}; nothing to scan"
+          fi
+      - uses: actions/download-artifact@v8
+        if: steps.probe.outputs.exists == 'true'
+        with:
+          name: ${{ matrix.component }}-image
+          path: /tmp
+      # syft reads the docker-archive directly, so the SBOM describes the
+      # layers as built rather than a re-resolved dependency list.
+      - uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        if: steps.probe.outputs.exists == 'true'
+        with:
+          image: docker-archive:/tmp/${{ matrix.component }}.tar
+          format: spdx-json
+          output-file: /tmp/${{ matrix.component }}.sbom.spdx.json
+          upload-artifact: false
+      - uses: actions/upload-artifact@v7
+        if: steps.probe.outputs.exists == 'true'
+        with:
+          name: ${{ matrix.component }}-sbom
+          path: /tmp/${{ matrix.component }}.sbom.spdx.json
+          retention-days: 1
+      - name: Summary
+        if: always()
+        uses: ./.github/actions/summary
+        with:
+          title: sbom (${{ matrix.component }})
+          body: |
+            SPDX SBOM via syft: `${{ steps.probe.outputs.exists }}`
+            (artifact `${{ matrix.component }}-sbom`).
+
+  grype:
+    name: grype (${{ matrix.component }})
+    needs: sbom
+    if: "!cancelled() && !failure()"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        component:
+          - infra-api
+          - infra-idp
+          - infra-exporter
+          - infra-controller-manager
+          - infra-www
+    steps:
+      - uses: actions/checkout@v6
+      - id: probe
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh api --paginate                "/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts?per_page=100"                --jq '.artifacts[].name' | grep -qx "${{ matrix.component }}-sbom"; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/download-artifact@v8
+        if: steps.probe.outputs.exists == 'true'
+        with:
+          name: ${{ matrix.component }}-sbom
+          path: /tmp
+      # Scan the SBOM, not the image: same answer, and it proves the SBOM we
+      # are about to attest is the thing that was actually vetted.
+      - name: Scan the SBOM
+        if: steps.probe.outputs.exists == 'true'
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        with:
+          sbom: /tmp/${{ matrix.component }}.sbom.spdx.json
+          severity-cutoff: high
+          fail-build: true
+          output-format: table
+      - name: Summary
+        if: always()
+        uses: ./.github/actions/summary
+        with:
+          title: grype (${{ matrix.component }})
+          body: |
+            grype at `--fail-on high` against the
+            `${{ matrix.component }}` SBOM: `${{ steps.probe.outputs.exists }}`.
+
   # Release on main only. multicz bumps cmd/<dir>/version.go, writes
   # changelogs, creates the release commit and per-component tags, and pushes
   # back to main. Artifact distribution is handled by the `publish` job.
@@ -443,6 +678,8 @@ jobs:
       - govulncheck
       - osv-scanner
       - integration
+      - hadolint
+      - grype
     # www is gated on www_changed, so it is skipped on non-frontend pushes. A
     # skipped need would skip release too, so tolerate skips (!cancelled) and
     # only block on real failures (!failure) rather than requiring success.
@@ -573,6 +810,9 @@ jobs:
         component: ${{ fromJson(needs.release.outputs.bumped_json) }}
     permissions:
       contents: write
+      packages: write # push to GHCR
+      id-token: write # cosign keyless signing via Sigstore
+      actions: write # delete the consumed CI artifacts
     steps:
       - uses: actions/checkout@v6
         with:
@@ -638,6 +878,52 @@ jobs:
             --title "$tag" \
             --notes "$notes" \
             dist/${component}_${version}_*
+      # Only the five containerised components have an image artifact from
+      # this run, and only when they actually changed. Probe instead of
+      # branching on a hardcoded component list, which would drift the moment
+      # the container matrix gains or loses an entry.
+      - id: has_image
+        name: Check for a container image from this run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh api --paginate \
+               "/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts?per_page=100" \
+               --jq '.artifacts[].name' | grep -qx "${{ matrix.component }}-image"; then
+            echo "value=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=false" >> "$GITHUB_OUTPUT"
+            echo "${{ matrix.component }} ships no container image this run"
+          fi
+      - id: meta
+        if: steps.has_image.outputs.value == 'true'
+        run: |
+          set -euo pipefail
+          echo "version=$(multicz get '${{ matrix.component }}')" >> "$GITHUB_OUTPUT"
+          # GHCR namespaces are lowercase; the org name already is, but a
+          # rename to a mixed-case owner would otherwise fail the push here
+          # rather than anywhere legible.
+          echo "owner=$(printf '%s' '${{ github.repository_owner }}' \
+            | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/publish-image
+        if: steps.has_image.outputs.value == 'true'
+        with:
+          component: ${{ matrix.component }}
+          version: ${{ steps.meta.outputs.version }}
+          owner: ${{ steps.meta.outputs.owner }}
+          token: ${{ github.token }}
+      # The image and its SBOM are published and signed; keeping the run
+      # artifacts would leave a second, unsigned copy of the same bits around
+      # for anyone reading the run page to pick up by mistake.
+      - name: Delete the consumed CI artifacts
+        if: steps.has_image.outputs.value == 'true'
+        uses: geekyeggo/delete-artifact@176a747ab7e287e3ff4787bf8a148716375ca118 # v6.0.0
+        with:
+          name: |
+            ${{ matrix.component }}-image
+            ${{ matrix.component }}-sbom
+          failOnError: false
       - name: Summary
         if: always()
         uses: ./.github/actions/summary
@@ -645,7 +931,9 @@ jobs:
           title: publish (${{ matrix.component }})
           body: |
             Cross-compiled `linux/amd64` + `linux/arm64`, packaged the `.deb`s
-            and cut the GitHub Release for `${{ matrix.component }}`.
+            and cut the GitHub Release for `${{ matrix.component }}`. Container
+            image pushed and cosign-signed:
+            `${{ steps.has_image.outputs.value }}`.
 
   # Build the Zensical site and deploy to GitHub Pages. Gated on a successful
   # release bump: the site embeds version + changelog content, so every bump
