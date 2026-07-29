@@ -15,6 +15,8 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+
+	"github.com/goabonga/infrastructure/internal/httpsec"
 )
 
 // securityTxt is the RFC 9116 advisory served at /.well-known/security.txt.
@@ -59,7 +61,7 @@ func New(static fs.FS, opts Options) (*Server, error) {
 
 // Handler returns the routed HTTP handler.
 func (s *Server) Handler() http.Handler {
-	return s.mux
+	return httpsec.Headers(s.mux)
 }
 
 // spa serves a static asset when it exists and falls back to index.html for
