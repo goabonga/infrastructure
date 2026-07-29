@@ -3,4 +3,4 @@
 [Service]
 EnvironmentFile={{ infra_conf_dir }}/idp.env
 ExecStart=
-ExecStart=/bin/sh -c 'export GOA_IDP_KEY="$(cat {{ infra_conf_dir }}/idp-es256.key)"; exec /usr/local/bin/infra-idp'
+ExecStart=/bin/sh -c 'export GOA_IDP_KEY="$(cat {{ infra_conf_dir }}/idp-es256.key)"; exec /usr/bin/infra-idp'
