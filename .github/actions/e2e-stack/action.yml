@@ -22,14 +22,6 @@ description: |
     - the release `infra` in namespace `infra`
     - port-forwards on 8080 (api), 8081 (idp), 9100 (exporter), 8088 (www)
 
-inputs:
-  owner:
-    required: true
-    description: Lowercase GHCR namespace, for the image pull fallback.
-  token:
-    required: true
-    description: "Token with `packages: read` on GHCR."
-
 runs:
   using: composite
   steps:
@@ -42,37 +34,27 @@ runs:
       with:
         version: v3.19.0
 
-    - uses: ./.github/actions/load-image
+    # The `container` matrix builds all five on every run, so the artifacts are
+    # always there. Downloading them rather than pulling from a registry is
+    # also what keeps this testable before the first release exists.
+    - uses: actions/download-artifact@v8
       with:
-        component: infra-api
-        owner: ${{ inputs.owner }}
-        token: ${{ inputs.token }}
-    - uses: ./.github/actions/load-image
-      with:
-        component: infra-controller-manager
-        owner: ${{ inputs.owner }}
-        token: ${{ inputs.token }}
-    - uses: ./.github/actions/load-image
-      with:
-        component: infra-idp
-        owner: ${{ inputs.owner }}
-        token: ${{ inputs.token }}
-    - uses: ./.github/actions/load-image
-      with:
-        component: infra-exporter
-        owner: ${{ inputs.owner }}
-        token: ${{ inputs.token }}
-    - uses: ./.github/actions/load-image
-      with:
-        component: infra-www
-        owner: ${{ inputs.owner }}
-        token: ${{ inputs.token }}
+        pattern: infra-*-image
+        merge-multiple: true
+        path: /tmp
 
     - name: Load the images into kind
       shell: bash
       run: |
         set -euo pipefail
         for c in infra-api infra-controller-manager infra-idp infra-exporter infra-www; do
+          # Assert rather than let kind fail obscurely: a missing tarball means
+          # the matching container leg did not upload, and the stack would
+          # otherwise come up short a workload and still report green.
+          test -f "/tmp/${c}.tar" || {
+            echo "::error::/tmp/${c}.tar is missing; the ${c} container leg did not produce an artifact"
+            exit 1
+          }
           kind load image-archive "/tmp/${c}.tar" --name infra-e2e
         done
 
