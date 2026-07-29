@@ -35,6 +35,12 @@ jobs:
       - uses: goabonga/multicz-action@95e90628797bc7dec0d2ad7d9abc6278f3465ed2 # v1.1.0
       - name: multicz validate --strict
         run: multicz validate --strict
+      - name: Summary
+        if: always()
+        uses: ./.github/actions/summary
+        with:
+          title: validate
+          body: "`multicz validate --strict` on `multicz.toml`."
 
   # Detect which components changed since the comparison ref. On PR: vs the
   # target branch. On main: vs each component's last tag (multicz default),
@@ -178,6 +184,12 @@ jobs:
           python scripts/add_license_header.py --path test --types go --check
           python scripts/add_license_header.py --path scripts --types py,sh --check
           python scripts/add_license_header.py --path .github --types yml,yaml --check
+      - name: Summary
+        if: always()
+        uses: ./.github/actions/summary
+        with:
+          title: license-headers
+          body: SPDX headers on `cmd/`, `internal/`, `test/`, `scripts/`, `.github/`.
 
   lint:
     name: lint
@@ -193,6 +205,12 @@ jobs:
       - uses: golangci/golangci-lint-action@v9
         with:
           version: latest
+      - name: Summary
+        if: always()
+        uses: ./.github/actions/summary
+        with:
+          title: lint
+          body: "`golangci-lint run` over the Go module."
 
   # Frontend quality gate (Node toolchain): lint, type-check, unit tests and a
   # production build of the Vite SPA. Gated on changes under www/.
@@ -212,7 +230,13 @@ jobs:
       run:
         working-directory: www
     steps:
+      # fetch-depth: 0 + bump-preview: the production build below is stamped
+      # with www/package.json's version, so without the preview a pull request
+      # would validate a bundle carrying the previous release's number.
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/bump-preview
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -223,6 +247,12 @@ jobs:
       - run: npm run typecheck
       - run: npm run test
       - run: npm run build
+      - name: Summary
+        if: always()
+        uses: ./.github/actions/summary
+        with:
+          title: www
+          body: "`eslint`, `tsc`, `vitest` and a production `vite build` of the SPA."
 
   vet-build:
     name: vet + build
@@ -231,6 +261,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      # Compile against the version the next release will ship, not the last
+      # one: `cmd/<component>/version.go` is a bump_files target.
+      - uses: ./.github/actions/bump-preview
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -241,6 +276,12 @@ jobs:
           go vet -tags=integration ./...
       - name: go build
         run: go build ./...
+      - name: Summary
+        if: always()
+        uses: ./.github/actions/summary
+        with:
+          title: vet + build
+          body: "`go vet` (both build tags) and `go build ./...`."
 
   test:
     name: test
@@ -249,6 +290,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/bump-preview
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -262,6 +306,12 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
           disable_search: true
+      - name: Summary
+        if: always()
+        uses: ./.github/actions/summary
+        with:
+          title: test
+          body: "`go test -race` with coverage, uploaded to Codecov."
 
   gosec:
     name: gosec
@@ -278,6 +328,12 @@ jobs:
         run: go install github.com/securego/gosec/v2/cmd/gosec@latest
       - name: Run gosec
         run: gosec ./...
+      - name: Summary
+        if: always()
+        uses: ./.github/actions/summary
+        with:
+          title: gosec
+          body: "`gosec` static security analysis over the Go module."
 
   govulncheck:
     name: govulncheck
@@ -294,6 +350,12 @@ jobs:
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
       - name: Run govulncheck
         run: govulncheck ./...
+      - name: Summary
+        if: always()
+        uses: ./.github/actions/summary
+        with:
+          title: govulncheck
+          body: "`govulncheck` against the Go vulnerability database."
 
   osv-scanner:
     name: osv-scanner
@@ -312,6 +374,12 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Run OSV-Scanner
         run: osv-scanner scan source --lockfile=go.mod
+      - name: Summary
+        if: always()
+        uses: ./.github/actions/summary
+        with:
+          title: osv-scanner
+          body: "`osv-scanner` on the `go.mod` dependency closure."
 
   # Privileged kernel-level integration suite (build tag `integration`). Runs
   # when any component changed OR the suite itself changed. NOTE: the real
@@ -350,6 +418,14 @@ jobs:
         env:
           POSTGRES_DSN: postgres://postgres:postgres@localhost:5432/infra?sslmode=disable
         run: go test -tags=integration ./test/integration/...
+      - name: Summary
+        if: always()
+        uses: ./.github/actions/summary
+        with:
+          title: integration
+          body: |
+            `go test -tags=integration` against a postgres service. The
+            kernel-level cases (bridge, firewall) self-skip without root.
 
   # Release on main only. multicz bumps cmd/<dir>/version.go, writes
   # changelogs, creates the release commit and per-component tags, and pushes
@@ -468,6 +544,15 @@ jobs:
           else
             echo "no_bumps=false" >> "$GITHUB_OUTPUT"
           fi
+      - name: Summary
+        if: always()
+        uses: ./.github/actions/summary
+        with:
+          title: release
+          body: |
+            Bumped: `${{ steps.bump.outputs.bumped || 'none' }}`. GPG signing:
+            `${{ steps.gpg.outputs.available }}`. `multicz plan` and
+            `multicz bump` append their own detail above.
 
   # Build and publish the bumped components: cross-compiled binaries attached
   # to a per-component GitHub Release. Matrix over each bumped component so one
@@ -553,6 +638,14 @@ jobs:
             --title "$tag" \
             --notes "$notes" \
             dist/${component}_${version}_*
+      - name: Summary
+        if: always()
+        uses: ./.github/actions/summary
+        with:
+          title: publish (${{ matrix.component }})
+          body: |
+            Cross-compiled `linux/amd64` + `linux/arm64`, packaged the `.deb`s
+            and cut the GitHub Release for `${{ matrix.component }}`.
 
   # Build the Zensical site and deploy to GitHub Pages. Gated on a successful
   # release bump: the site embeds version + changelog content, so every bump
@@ -590,3 +683,11 @@ jobs:
           path: site
       - id: deployment
         uses: actions/deploy-pages@v5
+      - name: Summary
+        if: always()
+        uses: ./.github/actions/summary
+        with:
+          title: docs
+          body: |
+            `zensical build --clean` deployed to GitHub Pages:
+            ${{ steps.deployment.outputs.page_url }}
