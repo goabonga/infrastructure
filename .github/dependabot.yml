@@ -75,6 +75,8 @@ updates:
           - "bridgecrewio/*"
           - "helm/*"
           - "zaproxy/*"
+          - "azure/*"
+          - "yannh/*"
     commit-message:
       prefix: "ci"
     labels:
