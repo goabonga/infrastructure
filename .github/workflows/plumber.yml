@@ -1,0 +1,108 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Chris <goabonga@pm.me>
+
+name: plumber
+
+# Plumber (getplumber.io) audits `.github/workflows/` and `.github/actions/`
+# for compliance and supply-chain issues: third-party actions pinned to a
+# mutable tag, unsafe triggers (`pull_request_target`, `workflow_run`),
+# template-injection sinks where an untrusted expression is interpolated into
+# a `run:` block, over-broad GITHUB_TOKEN permissions, debug toggles that leak
+# secrets, Docker-in-Docker. Findings upload as SARIF to the repo's Code
+# Scanning surface, so they land next to the code-level alerts instead of
+# only in a job log.
+#
+# This is the check that keeps the rest of the pipeline honest: nothing else
+# here notices when a new workflow reintroduces a floating action tag or hands
+# `contents: write` to a job that only reads.
+#
+# Fires on every change to workflows or composite actions, and weekly on top
+# of that - a freshly disclosed CVE in an already-merged pinned action shows
+# up on the next Monday sweep without needing a code change to trigger it.
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+      - ".github/actions/**"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/**"
+      - ".github/actions/**"
+  schedule:
+    - cron: "0 5 * * 1" # Monday 06:00 Europe/Paris (07:00 during DST)
+  workflow_dispatch: {}
+
+# `security-events: write` lets the action push SARIF into Code Scanning.
+# `actions: read` lets Plumber introspect the triggering workflow's siblings -
+# it parses every yml under .github/, not just the one that fired. Everything
+# else stays read-only.
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+concurrency:
+  group: plumber-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: audit
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      # Pinned by full commit SHA: Plumber's own ruleset flags tag-pinned
+      # third-party actions, so anything looser here would be the first
+      # finding it reports against itself.
+      - name: Run Plumber compliance audit
+        uses: getplumber/plumber@b6fe9f309d4242b82ce83e6e69c563c09792ca97 # v0.4.22
+        with:
+          # Fail on the first finding from any control. The strict bar is
+          # picked deliberately from the start so the audit genuinely gates
+          # merges; the alternative is a soft score nobody reads.
+          threshold: 100
+          # Authenticated reads for third-party-action resolution. Anonymous
+          # GitHub API access is capped at 60 req/h, which this repo's pinned
+          # actions exhaust in a single run - and a rate-limited check is
+          # *skipped*, which the strict threshold then counts as a failure.
+          # Dependabot PRs hit this hardest, since each introduces a batch of
+          # fresh SHAs to resolve at once. github.token is read-only on those
+          # PRs but still carries the 5000 req/h authenticated limit.
+          metadata-token: ${{ github.token }}
+          # On by default; kept explicit so the workflow's intent is legible
+          # without cross-referencing the action's defaults.
+          upload-sarif: true
+          # workflowMustNotUseDangerousTriggers (ISSUE-802) is suppressed for
+          # the two jobs in this repo that cannot exist without a privileged
+          # trigger:
+          #
+          #   dependabot-rewrite.yml   - workflow_run. Rewriting and
+          #     GPG-signing Dependabot's commits needs both the signing key
+          #     and a checkout of the PR head. The control is structurally
+          #     incompatible with any "rewrite and sign" workload.
+          #   auto-merge-signed.yml    - pull_request_target. Putting the
+          #     maintainer's key on a merge commit means creating that commit
+          #     from a runner that holds the key.
+          #
+          # Both are defended by shape rather than by this control: the
+          # rewrite is reachable only through a secretless signal workflow,
+          # splits `trusted/` from `pr/` so PR code never executes, and pins
+          # to head_sha; auto-merge runs no PR-authored code at all (git
+          # plumbing only), refuses fork branches, and re-verifies the
+          # labeller's write access server-side.
+          #
+          # Drop this skip the moment Plumber ships per-file suppression.
+          skip-controls: workflowMustNotUseDangerousTriggers
+
+      - name: Summary
+        if: always()
+        uses: ./.github/actions/summary
+        with:
+          title: plumber
+          body: |
+            Supply-chain and compliance audit of `.github/workflows/` and
+            `.github/actions/`. Findings are also published to Code Scanning
+            as SARIF.
