@@ -19,6 +19,14 @@ initial_version = "0.0.0"
 # committed module metadata stays consistent.
 post_bump_policy = "allow"
 state_file = ".multicz/state.json"
+# packaging/docker/Dockerfile is claimed by infra-api, infra-idp,
+# infra-exporter and infra-controller-manager: it is the one Dockerfile all
+# four build from. "all" is the intended reading of that overlap - a base-image
+# bump changes every image built from it, so every one of them ships a release.
+# The default would reject the config outright; "first-match" would release
+# whichever component happens to be declared first and silently leave the other
+# three on a stale base.
+overlap_policy = "all"
 
 # Custom commit types layered on the conventional defaults. `deprecate:`
 # announces an upcoming removal; `remove:` performs it after the n+2 window
@@ -55,7 +63,7 @@ types = ["perf"]
 # ── Control plane ─────────────────────────────────────────────────────────
 
 [components.infra-api]
-paths = ["cmd/api/**", "internal/handler/**", "internal/httpsrv/**", "web/**"]
+paths = ["cmd/api/**", "internal/handler/**", "internal/httpsrv/**", "web/**", "packaging/docker/Dockerfile"]
 bump_files = [
     { file = "cmd/api/version.go", key = "regex:Version\\s*=\\s*\"([^\"]+)\"" },
 ]
@@ -63,7 +71,7 @@ changelog = "cmd/api/CHANGELOG.md"
 post_bump = ["go mod tidy"]
 
 [components.infra-controller-manager]
-paths = ["cmd/controller-manager/**", "internal/controllers/**", "internal/scheduler/**"]
+paths = ["cmd/controller-manager/**", "internal/controllers/**", "internal/scheduler/**", "packaging/docker/Dockerfile"]
 bump_files = [
     { file = "cmd/controller-manager/version.go", key = "regex:Version\\s*=\\s*\"([^\"]+)\"" },
 ]
@@ -105,7 +113,7 @@ post_bump = ["go mod tidy"]
 [components.infra-idp]
 # internal/auth is shared core (consumed by the API too), so it is intentionally
 # not owned here; it is added back when the IDP itself is built.
-paths = ["cmd/idp/**", "internal/idp/**"]
+paths = ["cmd/idp/**", "internal/idp/**", "packaging/docker/Dockerfile"]
 bump_files = [
     { file = "cmd/idp/version.go", key = "regex:Version\\s*=\\s*\"([^\"]+)\"" },
 ]
@@ -115,7 +123,7 @@ post_bump = ["go mod tidy"]
 # ── Observability ─────────────────────────────────────────────────────────
 
 [components.infra-exporter]
-paths = ["cmd/exporter/**", "internal/metrics/**"]
+paths = ["cmd/exporter/**", "internal/metrics/**", "packaging/docker/Dockerfile"]
 bump_files = [
     { file = "cmd/exporter/version.go", key = "regex:Version\\s*=\\s*\"([^\"]+)\"" },
 ]
@@ -146,7 +154,7 @@ changelog = "www/CHANGELOG.md"
 # The web dashboard server embeds the SPA, so it depends on infra-spa: a SPA
 # change bumps infra-spa and cascades a bump here, rebuilding the embedded binary.
 [components.infra-www]
-paths = ["cmd/www/**", "internal/web/**"]
+paths = ["cmd/www/**", "internal/web/**", "packaging/docker/www.Dockerfile"]
 bump_files = [
     { file = "cmd/www/version.go", key = "regex:Version\\s*=\\s*\"([^\"]+)\"" },
 ]
