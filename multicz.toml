@@ -26,6 +26,13 @@ state_file = ".multicz/state.json"
 # The default would reject the config outright; "first-match" would release
 # whichever component happens to be declared first and silently leave the other
 # three on a stale base.
+#
+# CAUTION: this fans out the BUMP PLAN only. `multicz changed` does not honour
+# it - it attributes a shared file to a single component, and has been observed
+# to name components with no changed file at all. So never gate a per-component
+# build on `multicz changed` output while an overlap exists; CI builds every
+# container and every package on any change for exactly this reason (see the
+# `container` job in .github/workflows/ci.yml).
 overlap_policy = "all"
 
 # Custom commit types layered on the conventional defaults. `deprecate:`

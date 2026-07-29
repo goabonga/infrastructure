@@ -507,28 +507,27 @@ jobs:
       # The image carries its version as an OCI label, so it has to be the
       # version the release will publish, not the last one it shipped.
       - uses: ./.github/actions/bump-preview
-      - id: skip
-        name: Skip components this push did not touch
-        env:
-          PACKAGES: ${{ needs.detect.outputs.packages }}
-          COMPONENT: ${{ matrix.component }}
-        run: |
-          set -euo pipefail
-          if echo "$PACKAGES" | jq -e --arg c "$COMPONENT" 'index($c)' > /dev/null; then
-            echo "build=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "build=false" >> "$GITHUB_OUTPUT"
-            echo "$COMPONENT unchanged; skipping image build"
-          fi
+      # Every leg builds, on every run where anything changed - there is no
+      # per-component skip here.
+      #
+      # The obvious optimisation is to build only the components listed in
+      # `detect.packages`, and it is wrong: `multicz changed` cannot attribute a
+      # file claimed by several components. packaging/docker/Dockerfile is
+      # claimed by four, and `changed` hands it to exactly one of them - so a
+      # base-image bump would rebuild one image, cascade a release to all four
+      # (overlap_policy = "all" does fan out, but only in the bump plan), and
+      # publish three of them pointing at a stale image. It over-reports too,
+      # naming components with no changed file at all.
+      #
+      # Building all five is what keeps the release honest. The gha layer cache
+      # makes an unchanged component nearly free, which is a smaller price than
+      # reasoning about which images a shared file invalidates.
       - id: version
-        if: steps.skip.outputs.build == 'true'
         run: |
           set -euo pipefail
           echo "value=$(multicz get '${{ matrix.component }}')" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
-        if: steps.skip.outputs.build == 'true'
       - name: Build ${{ matrix.component }}:ci
-        if: steps.skip.outputs.build == 'true'
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
@@ -544,10 +543,8 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.component }}
           cache-to: type=gha,mode=max,scope=${{ matrix.component }},ignore-error=true
       - name: Save image tarball
-        if: steps.skip.outputs.build == 'true'
         run: docker save "${{ matrix.component }}:ci" -o "/tmp/${{ matrix.component }}.tar"
       - uses: actions/upload-artifact@v7
-        if: steps.skip.outputs.build == 'true'
         with:
           name: ${{ matrix.component }}-image
           path: /tmp/${{ matrix.component }}.tar
@@ -560,9 +557,8 @@ jobs:
         with:
           title: container (${{ matrix.component }})
           body: |
-            Built: `${{ steps.skip.outputs.build }}`. Image
-            `${{ matrix.component }}:ci` at version
-            `${{ steps.version.outputs.value || 'n/a' }}`, saved to artifact
+            Image `${{ matrix.component }}:ci` at version
+            `${{ steps.version.outputs.value }}`, saved to artifact
             `${{ matrix.component }}-image`.
 
   sbom:
@@ -581,36 +577,24 @@ jobs:
           - infra-www
     steps:
       - uses: actions/checkout@v6
-      # The upstream leg skips components this push did not touch, so there
-      # may be no artifact. Probe rather than fail: a partial-change run is
-      # the normal case, not an error.
-      - id: probe
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          if gh api --paginate                "/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts?per_page=100"                --jq '.artifacts[].name' | grep -qx "${{ matrix.component }}-image"; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "no image artifact for ${{ matrix.component }}; nothing to scan"
-          fi
+      # No probe: `container` builds every leg on every run, so the artifact is
+      # always present, and if its leg failed this job is skipped by
+      # `!failure()` before reaching here. A missing artifact is therefore a
+      # real error, and download-artifact should say so rather than be
+      # tiptoed around.
       - uses: actions/download-artifact@v8
-        if: steps.probe.outputs.exists == 'true'
         with:
           name: ${{ matrix.component }}-image
           path: /tmp
       # syft reads the docker-archive directly, so the SBOM describes the
       # layers as built rather than a re-resolved dependency list.
       - uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
-        if: steps.probe.outputs.exists == 'true'
         with:
           image: docker-archive:/tmp/${{ matrix.component }}.tar
           format: spdx-json
           output-file: /tmp/${{ matrix.component }}.sbom.spdx.json
           upload-artifact: false
       - uses: actions/upload-artifact@v7
-        if: steps.probe.outputs.exists == 'true'
         with:
           name: ${{ matrix.component }}-sbom
           path: /tmp/${{ matrix.component }}.sbom.spdx.json
@@ -621,8 +605,7 @@ jobs:
         with:
           title: sbom (${{ matrix.component }})
           body: |
-            SPDX SBOM via syft: `${{ steps.probe.outputs.exists }}`
-            (artifact `${{ matrix.component }}-sbom`).
+            SPDX SBOM via syft, uploaded as `${{ matrix.component }}-sbom`.
 
   grype:
     name: grype (${{ matrix.component }})
@@ -640,25 +623,13 @@ jobs:
           - infra-www
     steps:
       - uses: actions/checkout@v6
-      - id: probe
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          if gh api --paginate                "/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts?per_page=100"                --jq '.artifacts[].name' | grep -qx "${{ matrix.component }}-sbom"; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
       - uses: actions/download-artifact@v8
-        if: steps.probe.outputs.exists == 'true'
         with:
           name: ${{ matrix.component }}-sbom
           path: /tmp
       # Scan the SBOM, not the image: same answer, and it proves the SBOM we
       # are about to attest is the thing that was actually vetted.
       - name: Scan the SBOM
-        if: steps.probe.outputs.exists == 'true'
         uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
         with:
           sbom: /tmp/${{ matrix.component }}.sbom.spdx.json
@@ -671,8 +642,8 @@ jobs:
         with:
           title: grype (${{ matrix.component }})
           body: |
-            grype at `--fail-on high` against the
-            `${{ matrix.component }}` SBOM: `${{ steps.probe.outputs.exists }}`.
+            grype at `--fail-on high` against the `${{ matrix.component }}`
+            SBOM.
 
   # ---------------------------------------------------------------------
   # Debian packaging chain. Every component except infra-www and infra-spa
@@ -711,21 +682,10 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - id: skip
-        name: Skip components this push did not touch
-        env:
-          PACKAGES: ${{ needs.detect.outputs.packages }}
-          COMPONENT: ${{ matrix.component }}
-        run: |
-          set -euo pipefail
-          if echo "$PACKAGES" | jq -e --arg c "$COMPONENT" 'index($c)' > /dev/null; then
-            echo "build=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "build=false" >> "$GITHUB_OUTPUT"
-            echo "$COMPONENT unchanged; skipping .deb build"
-          fi
+      # All eight, every run, for the reason spelled out in the `container`
+      # job: a component released by cascade needs a package too, and
+      # `multicz changed` cannot tell us which those are.
       - name: Build the ${{ matrix.component }} .deb
-        if: steps.skip.outputs.build == 'true'
         run: |
           set -euo pipefail
           version=$(multicz get '${{ matrix.component }}')
@@ -734,7 +694,6 @@ jobs:
           # both architectures from the same script.
           ARCH=amd64 ./packaging/build-debs.sh "$version" '${{ matrix.component }}'
       - uses: actions/upload-artifact@v7
-        if: steps.skip.outputs.build == 'true'
         with:
           name: ${{ matrix.component }}-deb
           path: dist/${{ matrix.component }}_*_amd64.deb
@@ -744,9 +703,7 @@ jobs:
         uses: ./.github/actions/summary
         with:
           title: deb (${{ matrix.component }})
-          body: |
-            Built: `${{ steps.skip.outputs.build }}`. amd64 package uploaded as
-            `${{ matrix.component }}-deb`.
+          body: amd64 package uploaded as `${{ matrix.component }}-deb`.
 
   deb-validate:
     name: deb-validate (${{ matrix.component }})
@@ -784,21 +741,10 @@ jobs:
             security_threshold: "75"
     steps:
       - uses: actions/checkout@v6
-      - id: probe
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          if gh api --paginate \
-               "/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts?per_page=100" \
-               --jq '.artifacts[].name' | grep -qx "${{ matrix.component }}-deb"; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "no .deb artifact for ${{ matrix.component }}; nothing to validate"
-          fi
+      # No probe, for the same reason as the sbom job: `deb` builds all eight
+      # legs on every run, so a missing artifact means its leg failed - and
+      # that already skips this job through `!failure()`.
       - uses: ./.github/actions/validate-deb
-        if: steps.probe.outputs.exists == 'true'
         with:
           component: ${{ matrix.component }}
           has-unit: ${{ matrix.has_unit }}
@@ -809,8 +755,7 @@ jobs:
         with:
           title: deb-validate (${{ matrix.component }})
           body: |
-            Validated: `${{ steps.probe.outputs.exists }}`. lintian
-            (`--fail-on error`), `test/install/validate.sh` against the
+            lintian (`--fail-on error`), `test/install/validate.sh` against the
             installed package, and `systemd-analyze security` at threshold
             `${{ matrix.security_threshold || '11' }}`.
 
@@ -990,20 +935,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: read # pull the last release of any component this run did not build
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - id: owner
-        run: |
-          set -euo pipefail
-          echo "value=$(printf '%s' '${{ github.repository_owner }}' \
-            | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
       - uses: ./.github/actions/e2e-stack
-        with:
-          owner: ${{ steps.owner.outputs.value }}
-          token: ${{ github.token }}
       - name: Run the end-to-end suite
         run: test/e2e/smoke.sh
       # The pod state at the moment of failure is the whole diagnosis, and it
@@ -1038,7 +974,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: read
     strategy:
       fail-fast: false
       matrix:
@@ -1051,15 +986,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - id: owner
-        run: |
-          set -euo pipefail
-          echo "value=$(printf '%s' '${{ github.repository_owner }}' \
-            | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
       - uses: ./.github/actions/e2e-stack
-        with:
-          owner: ${{ steps.owner.outputs.value }}
-          token: ${{ github.token }}
       - uses: ./.github/actions/owasp-scan
         with:
           target: http://127.0.0.1:${{ matrix.port }}
