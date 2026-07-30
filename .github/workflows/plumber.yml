@@ -52,7 +52,7 @@ jobs:
     name: audit
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # Pinned by full commit SHA: Plumber's own ruleset flags tag-pinned
       # third-party actions, so anything looser here would be the first
