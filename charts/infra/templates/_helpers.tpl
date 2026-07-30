@@ -104,6 +104,26 @@ the value never appears in the rendered manifest.
 {{- end -}}
 
 {{/*
+The URL infra-www proxies /api to.
+
+Derived from the in-cluster api Service unless the caller overrides it. Fails
+rather than guessing when the dashboard is enabled, the API is not, and no
+external URL was given: the resulting deployment serves a dashboard whose every
+data call 502s, which looks like a broken API rather than a misconfigured chart.
+*/}}
+{{- define "infra.apiURL" -}}
+{{- $root := .root -}}
+{{- $www := $root.Values.components.www -}}
+{{- if $www.apiURL -}}
+{{- $www.apiURL -}}
+{{- else if $root.Values.components.api.enabled -}}
+{{- printf "http://%s-api.%s.svc:%v" (include "infra.fullname" $root) $root.Release.Namespace $root.Values.components.api.service.port -}}
+{{- else -}}
+{{- fail "components.www is enabled but components.api is not, and components.www.apiURL is empty. The dashboard proxies /api to the control plane, so it needs an API to reach: enable components.api, set components.www.apiURL to an external control plane, or disable components.www." -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Client credentials for infra-idp, from a secret whenever one is configured so
 the tokens never appear in the rendered manifest.
 */}}

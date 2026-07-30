@@ -850,7 +850,21 @@ jobs:
           helm template infra charts/infra --namespace infra \
             --set components.idp.enabled=true \
             --set components.idp.existingSecret=infra-idp-clients > /dev/null
-          echo "both guards reject the unsafe case and accept the safe one"
+          # www enabled with no API to proxy to: rejected. The dashboard would
+          # come up serving 502s on every data call.
+          if helm template infra charts/infra --namespace infra \
+               --set components.api.enabled=false > /dev/null 2>&1; then
+            echo "::error::www with no api and no apiURL should have failed to render"
+            exit 1
+          fi
+          helm template infra charts/infra --namespace infra \
+            --set components.api.enabled=false \
+            --set components.www.apiURL=https://api.example.com > /dev/null
+          # The dashboard must actually be pointed somewhere, not merely render.
+          helm template infra charts/infra --namespace infra \
+            | grep -q 'name: GOA_API_URL' \
+            || { echo "::error::the www Deployment carries no GOA_API_URL"; exit 1; }
+          echo "all three guards reject the unsafe case and accept the safe one"
       - name: Summary
         if: always()
         uses: ./.github/actions/summary
