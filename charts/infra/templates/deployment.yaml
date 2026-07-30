@@ -93,6 +93,10 @@ spec:
             {{- if eq $name "idp" }}
             {{- include "infra.idpEnv" (dict "root" $root) | nindent 12 }}
             {{- end }}
+            {{- if eq $name "www" }}
+            - name: GOA_API_URL
+              value: {{ include "infra.apiURL" (dict "root" $root) | quote }}
+            {{- end }}
             {{- with $c.env }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

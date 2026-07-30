@@ -154,6 +154,14 @@ components:
     image:
       repository: infra-www
       tag: 0.0.0
+    # The dashboard proxies /api to the control plane so the browser talks to
+    # one origin. Left empty, the chart points it at the in-cluster api Service,
+    # which is what makes the two work together out of the box - the binary's
+    # own default is http://localhost:8080, which inside a pod is nothing.
+    #
+    # Set this to reach an API outside the release (a shared control plane, an
+    # ingress hostname); then components.api can be disabled.
+    apiURL: ""
     replicas: 2
     port: 8088
     needsState: false
